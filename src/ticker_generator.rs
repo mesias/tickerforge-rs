@@ -8,7 +8,7 @@ use crate::dates::is_month_in_calendar_range;
 use crate::expiration_rules::{month_sessions, resolve_expiration};
 use crate::models::{ContractSpec, SpecRepository};
 use crate::month_codes::month_to_code;
-use crate::spec_loader::load_spec;
+use crate::spec_loader::{load_spec, load_spec_from_path};
 
 fn coerce_date(as_of: &str) -> Result<NaiveDate, String> {
     NaiveDate::parse_from_str(as_of.trim(), "%Y-%m-%d")
@@ -98,9 +98,13 @@ pub struct TickerForge {
 }
 
 impl TickerForge {
-    pub fn new(spec_path: Option<&std::path::Path>) -> Result<Self, String> {
+    pub fn new() -> Result<Self, String> {
+        Ok(Self { spec: load_spec()? })
+    }
+
+    pub fn with_spec_path(path: &std::path::Path) -> Result<Self, String> {
         Ok(Self {
-            spec: load_spec(spec_path)?,
+            spec: load_spec_from_path(path)?,
         })
     }
 

@@ -14,7 +14,7 @@ fn futures_resolve_b3_all_rows() {
     let path = spec_path().join("tests/b3/futures_resolve.csv");
     let f = File::open(&path).expect("open csv");
     let mut rdr = ReaderBuilder::new().has_headers(true).from_reader(f);
-    let forge = TickerForge::new(Some(&spec_path())).expect("forge");
+    let forge = TickerForge::with_spec_path(&spec_path()).expect("forge");
     for rec in rdr.records() {
         let rec = rec.expect("row");
         let symbol = rec.get(0).expect("symbol");

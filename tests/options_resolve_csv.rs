@@ -12,7 +12,7 @@ fn options_resolve_b3_matches_generate() {
     let path = spec_path().join("tests/b3/options_resolve.csv");
     let f = File::open(&path).expect("open csv");
     let mut rdr = ReaderBuilder::new().has_headers(true).from_reader(f);
-    let gen = OptionGenerator::from_paths(Some(&spec_path()), None).expect("opt gen");
+    let gen = OptionGenerator::with_spec_root(&spec_path()).expect("opt gen");
     for rec in rdr.records() {
         let rec = rec.expect("row");
         let kind = rec.get(0).expect("type");

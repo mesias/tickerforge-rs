@@ -106,11 +106,26 @@ impl OptionGenerator {
         Self { spec, rules }
     }
 
-    pub fn from_paths(
+    /// Load futures spec and B3 options rules from the bundled default paths.
+    pub fn bundled() -> Result<Self, String> {
+        Self::from_spec_and_options_paths(None, None)
+    }
+
+    /// Load from a custom spec root directory (uses `spec_root/contracts/b3/options.yaml` for options).
+    pub fn with_spec_root(spec_root: &std::path::Path) -> Result<Self, String> {
+        let options = spec_root.join("contracts").join("b3").join("options.yaml");
+        Self::from_spec_and_options_paths(Some(spec_root), Some(&options))
+    }
+
+    /// Load with optional spec root and optional `options.yaml` path (same defaults as [`bundled()`]).
+    pub fn from_spec_and_options_paths(
         spec_path: Option<&std::path::Path>,
         options_path: Option<&std::path::Path>,
     ) -> Result<Self, String> {
-        let spec = crate::spec_loader::load_spec(spec_path)?;
+        let spec = match spec_path {
+            Some(p) => crate::spec_loader::load_spec_from_path(p)?,
+            None => crate::spec_loader::load_spec()?,
+        };
         let rules = load_option_rules(options_path)?;
         Ok(Self::new(spec, rules))
     }

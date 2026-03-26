@@ -1,7 +1,7 @@
 mod common;
 
 use tickerforge::contract_cycle::resolve_contract_months;
-use tickerforge::{load_spec, month_codes};
+use tickerforge::{load_spec_from_path, month_codes};
 
 use crate::common::spec_path;
 
@@ -15,7 +15,7 @@ fn month_code_round_trip() {
 
 #[test]
 fn resolve_contract_months_for_common_cycles() {
-    let spec = load_spec(Some(&spec_path())).expect("load");
+    let spec = load_spec_from_path(&spec_path()).expect("load");
     let monthly = spec.contract_cycles.get("monthly").expect("monthly");
     let quarterly = spec.contract_cycles.get("quarterly").expect("quarterly");
     let bimonthly_even = spec

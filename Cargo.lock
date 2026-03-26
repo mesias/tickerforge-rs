@@ -342,8 +342,14 @@ dependencies = [
  "regex",
  "serde",
  "serde_yaml",
+ "tickerforge-spec-data",
  "xz2",
 ]
+
+[[package]]
+name = "tickerforge-spec-data"
+version = "0.1.0"
+source = "git+https://github.com/mesias/tickerforge-spec.git?branch=main#df7eb8b65d2cb10538de139c57a3ae37749a2517"
 
 [[package]]
 name = "unicode-ident"

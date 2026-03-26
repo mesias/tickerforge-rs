@@ -6,8 +6,7 @@ use std::path::{Path, PathBuf};
 use crate::options_models::OptionRule;
 
 fn default_options_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("spec")
+    tickerforge_spec_data::default_spec_root()
         .join("contracts")
         .join("b3")
         .join("options.yaml")

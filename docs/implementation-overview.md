@@ -2,7 +2,7 @@
 
 ## Phases
 
-1. **Futures parity with tickerforge-py** — `load_spec`, `TickerForge`, `TickerParser`, `generate_ticker_for_contract`, `parse_ticker`, month codes, contract cycles, expiration rules, `bdays`-backed calendars.
+1. **Futures parity with tickerforge-py** — `load_spec` / `load_spec_from_path`, `TickerForge` / `TickerParser` (`new` vs `with_spec_path`), `generate_ticker_for_contract`, `parse_ticker`, month codes, contract cycles, expiration rules, `bdays`-backed calendars.
 2. **Options** — Load `spec/contracts/b3/options.yaml`, `OptionGenerator` for equity / IBOV / DOL / IDI, CSV tests where calendar parity allows.
 3. **Tooling** — `rustfmt`, `clippy -D warnings`, GitHub Actions, pre-commit, optional Codecov via `cargo llvm-cov`.
 
@@ -22,7 +22,7 @@
 
 ## Parity checklist
 
-- [x] `load_spec` / default `spec/` path
+- [x] `load_spec` / `load_spec_from_path` (bundled default vs custom path)
 - [x] IND generation and parse round-trip (representative dates)
 - [x] Expiration spot checks (IND Jun, DOL Apr)
 - [x] CSV: `futures_resolve` rows for WIN/IND

@@ -14,6 +14,8 @@ serde_yaml = "0.9"
 regex = "1.10"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 bdays = "0.1"
+# Bundled default spec (same tree as PyPI/git `tickerforge-spec-data`). Override: `with_spec_path` / `load_spec_from_path`.
+tickerforge-spec-data = { git = "https://github.com/mesias/tickerforge-spec.git", branch = "main" }
 
 [dev-dependencies]
 csv = "1.3"

@@ -167,14 +167,22 @@ fn load_contracts(spec_root: &Path) -> Result<Vec<ContractSpec>, String> {
 }
 
 fn default_spec_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("spec")
+    tickerforge_spec_data::default_spec_root()
 }
 
-/// Load futures spec. If `path` is `None`, uses `CARGO_MANIFEST_DIR/spec`.
-pub fn load_spec(path: Option<&Path>) -> Result<SpecRepository, String> {
-    let spec_root = path
-        .map(Path::to_path_buf)
-        .unwrap_or_else(default_spec_path)
+/// Load the default futures spec tree from the `tickerforge-spec-data` crate
+/// (canonical YAML under <https://github.com/mesias/tickerforge-spec>).
+pub fn load_spec() -> Result<SpecRepository, String> {
+    load_spec_at(default_spec_path())
+}
+
+/// Load futures spec from a directory (must contain `exchanges/`, `contracts/`, `schemas/`, etc.).
+pub fn load_spec_from_path(path: &Path) -> Result<SpecRepository, String> {
+    load_spec_at(path.to_path_buf())
+}
+
+fn load_spec_at(spec_root: PathBuf) -> Result<SpecRepository, String> {
+    let spec_root = spec_root
         .canonicalize()
         .map_err(|e| format!("spec path: {e}"))?;
 

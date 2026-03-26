@@ -8,7 +8,7 @@
 [![rustfmt](https://img.shields.io/badge/rustfmt-000000?logo=rust&logoColor=white)](https://github.com/rust-lang/rustfmt)
 [![clippy](https://img.shields.io/badge/clippy-000000?logo=rust&logoColor=white)](https://github.com/rust-lang/rust-clippy)
 
-Rust library that loads the vendored [`tickerforge-spec`](https://github.com/mesias/tickerforge-spec) tree under `spec/` and generates or parses **futures** tickers (parity with [`tickerforge-py`](https://github.com/mesias/tickerforge-py)). **Options** tickers are supported for B3 per `spec/contracts/b3/options.yaml` (see `OptionGenerator`).
+Rust library that loads the default [`tickerforge-spec`](https://github.com/mesias/tickerforge-spec) YAML tree from the [`tickerforge-spec-data`](https://github.com/mesias/tickerforge-spec) crate (git dependency, same content as the Python `tickerforge-spec-data` wheel) and generates or parses **futures** tickers (parity with [`tickerforge-py`](https://github.com/mesias/tickerforge-py)). **Options** tickers are supported for B3 per `spec/contracts/b3/options.yaml` (see `OptionGenerator`).
 
 Trading sessions use the [`bdays`](https://crates.io/crates/bdays) crate (B3 `BrazilExchange`, US `USSettlement` for CME). Full alignment with Python’s `exchange_calendars` is not guaranteed; see [`docs/calendar-strategy.md`](docs/calendar-strategy.md).
 
@@ -33,23 +33,23 @@ tickerforge = { path = "../tickerforge-rs" }
 ```rust
 use tickerforge::{TickerForge, TickerParser};
 
-let forge = TickerForge::new(None).expect("spec");
+let forge = TickerForge::new().expect("spec");
 let ticker = forge.generate("IND", "2026-06-01", 0).expect("generate");
 assert_eq!(ticker, "INDM26");
 
-let parser = TickerParser::new(None).expect("spec");
+let parser = TickerParser::new().expect("spec");
 let parsed = parser.parse(&ticker, Some("2026-06-01")).expect("parse");
 assert_eq!(parsed.symbol, "IND");
 ```
 
-`TickerForge::new(None)` loads `spec/` next to the crate manifest (`CARGO_MANIFEST_DIR/spec`). Pass `Some(path)` to use another directory.
+`TickerForge::new()` loads the bundled default spec from `tickerforge-spec-data`. Use `TickerForge::with_spec_path(path)` (and `TickerParser::with_spec_path(path)`) for a custom spec directory. The default root path is also available as `tickerforge::default_spec_root`.
 
 ### Options (B3)
 
 ```rust
 use tickerforge::options_ticker::OptionGenerator;
 
-let gen = OptionGenerator::from_paths(None, None).expect("load");
+let gen = OptionGenerator::bundled().expect("load");
 let t = gen
     .generate_equity("PETR4", "2026-01-16", true, 35, 0)
     .expect("equity option");

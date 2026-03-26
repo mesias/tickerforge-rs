@@ -12,8 +12,27 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout tickerforge-rs
         uses: actions/checkout@v4
+        with:
+          path: rs
+
+      - name: Checkout tickerforge-spec (patch target for bundled spec)
+        uses: actions/checkout@v4
+        with:
+          repository: mesias/tickerforge-spec
+          path: spec
+
+      - name: Workspace (patch git dep with sibling spec crate)
+        run: |
+          cat > Cargo.toml <<'EOF'
+          [workspace]
+          members = ["rs", "spec"]
+          resolver = "2"
+
+          [patch."https://github.com/mesias/tickerforge-spec.git"]
+          tickerforge-spec-data = { path = "spec" }
+          EOF
 
       - name: Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -21,33 +40,47 @@ jobs:
           components: rustfmt, clippy
 
       - name: cargo fmt
-        run: cargo fmt -- --check
+        run: cargo fmt --all -- --check
 
       - name: cargo clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
   test:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout tickerforge-rs
         uses: actions/checkout@v4
+        with:
+          path: rs
+
+      - name: Checkout tickerforge-spec
+        uses: actions/checkout@v4
+        with:
+          repository: mesias/tickerforge-spec
+          path: spec
+
+      - name: Workspace (patch git dep with sibling spec crate)
+        run: |
+          cat > Cargo.toml <<'EOF'
+          [workspace]
+          members = ["rs", "spec"]
+          resolver = "2"
+
+          [patch."https://github.com/mesias/tickerforge-spec.git"]
+          tickerforge-spec-data = { path = "spec" }
+          EOF
 
       - name: Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Fetch tickerforge-spec (tests read spec/; not committed)
-        run: |
-          git clone --depth 1 https://github.com/mesias/tickerforge-spec.git /tmp/tickerforge-spec
-          cp -a /tmp/tickerforge-spec/spec .
-
       - name: cargo test
-        run: cargo test
+        run: cargo test -p tickerforge
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Generate coverage
-        run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
+        run: cargo llvm-cov --all-features -p tickerforge --lcov --output-path lcov.info
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4

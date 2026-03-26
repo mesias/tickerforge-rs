@@ -3,13 +3,13 @@ mod common;
 use chrono::NaiveDate;
 use tickerforge::calendars::get_calendar;
 use tickerforge::expiration_rules::resolve_expiration;
-use tickerforge::load_spec;
+use tickerforge::load_spec_from_path;
 
 use crate::common::spec_path;
 
 #[test]
 fn resolve_nearest_weekday_to_day_for_ind() {
-    let spec = load_spec(Some(&spec_path())).expect("load");
+    let spec = load_spec_from_path(&spec_path()).expect("load");
     let contract = spec.get_contract("IND").expect("IND");
     let rule = spec
         .expiration_rules
@@ -22,7 +22,7 @@ fn resolve_nearest_weekday_to_day_for_ind() {
 
 #[test]
 fn resolve_first_business_day_for_dol() {
-    let spec = load_spec(Some(&spec_path())).expect("load");
+    let spec = load_spec_from_path(&spec_path()).expect("load");
     let contract = spec.get_contract("DOL").expect("DOL");
     let rule = spec
         .expiration_rules

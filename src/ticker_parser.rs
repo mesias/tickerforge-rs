@@ -7,7 +7,7 @@ use regex::Regex;
 use crate::contract_cycle::resolve_contract_months;
 use crate::models::{ContractSpec, ParsedFuturesTicker, SpecRepository};
 use crate::month_codes::code_to_month;
-use crate::spec_loader::load_spec;
+use crate::spec_loader::{load_spec, load_spec_from_path};
 
 fn coerce_reference_date(reference_date: Option<&str>) -> NaiveDate {
     if let Some(s) = reference_date {
@@ -77,9 +77,13 @@ pub struct TickerParser {
 }
 
 impl TickerParser {
-    pub fn new(spec_path: Option<&std::path::Path>) -> Result<Self, String> {
+    pub fn new() -> Result<Self, String> {
+        Ok(Self { spec: load_spec()? })
+    }
+
+    pub fn with_spec_path(path: &std::path::Path) -> Result<Self, String> {
         Ok(Self {
-            spec: load_spec(spec_path)?,
+            spec: load_spec_from_path(path)?,
         })
     }
 

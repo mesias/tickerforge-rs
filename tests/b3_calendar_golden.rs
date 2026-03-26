@@ -26,7 +26,7 @@ fn b3_win_ind_dol_calendar_matches_generator() {
         return;
     }
 
-    let forge = TickerForge::new(Some(&spec_path())).expect("forge");
+    let forge = TickerForge::with_spec_path(&spec_path()).expect("forge");
     let cal = get_calendar("B3");
     let cal_first = cal.first_session();
     let cal_last = cal.last_session();
