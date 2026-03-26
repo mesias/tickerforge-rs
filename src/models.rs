@@ -3,6 +3,8 @@
 use serde::Deserialize;
 use std::collections::HashMap;
 
+use crate::schedule::ExchangeSchedule;
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Asset {
     pub symbol: String,
@@ -89,6 +91,7 @@ pub struct SpecRepository {
     pub contracts: HashMap<String, ContractSpec>,
     pub contract_cycles: HashMap<String, ContractCycle>,
     pub expiration_rules: HashMap<String, ExpirationRule>,
+    pub schedules: HashMap<String, ExchangeSchedule>,
 }
 
 impl SpecRepository {

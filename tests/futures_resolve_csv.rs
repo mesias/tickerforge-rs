@@ -7,10 +7,10 @@ use tickerforge::TickerForge;
 
 use crate::common::spec_path;
 
-/// Drive examples from `futures_resolve.csv`. Full-file parity requires `exchange_calendars`-aligned
-/// sessions (see `docs/calendar-strategy.md`); we assert **WIN** and **IND** rows which match `bdays` in tests.
+/// Drive rows from `futures_resolve.csv` against the spec-driven schedule engine.
+/// ICF rows are skipped because `schedule` expiration rules need external data.
 #[test]
-fn futures_resolve_b3_win_ind_rows() {
+fn futures_resolve_b3_all_rows() {
     let path = spec_path().join("tests/b3/futures_resolve.csv");
     let f = File::open(&path).expect("open csv");
     let mut rdr = ReaderBuilder::new().has_headers(true).from_reader(f);
@@ -18,7 +18,7 @@ fn futures_resolve_b3_win_ind_rows() {
     for rec in rdr.records() {
         let rec = rec.expect("row");
         let symbol = rec.get(0).expect("symbol");
-        if !matches!(symbol, "WIN" | "IND") {
+        if symbol == "ICF" {
             continue;
         }
         let date = rec.get(1).expect("date");
@@ -27,7 +27,7 @@ fn futures_resolve_b3_win_ind_rows() {
         let comment = rec.get(4).unwrap_or("");
         let got = forge
             .generate(symbol, date, offset)
-            .unwrap_or_else(|e| panic!("{e} (row comment: {comment})"));
+            .unwrap_or_else(|e| panic!("{e} (symbol={symbol}, date={date}, comment: {comment})"));
         assert_eq!(got, expected, "row {:?}", rec);
     }
 }

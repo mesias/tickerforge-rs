@@ -9,6 +9,7 @@ pub mod month_codes;
 pub mod options_models;
 pub mod options_spec;
 pub mod options_ticker;
+pub mod schedule;
 pub mod spec_loader;
 pub mod ticker_generator;
 pub mod ticker_parser;

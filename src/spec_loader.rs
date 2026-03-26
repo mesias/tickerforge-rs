@@ -4,7 +4,9 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::calendars::register_schedules;
 use crate::models::{Asset, ContractCycle, ContractSpec, Exchange, ExpirationRule, SpecRepository};
+use crate::schedule::load_schedules;
 
 fn read_yaml_mapping(path: &Path) -> Result<serde_yaml::Mapping, String> {
     let raw = fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
@@ -200,10 +202,14 @@ pub fn load_spec(path: Option<&Path>) -> Result<SpecRepository, String> {
         contracts.insert(c.symbol.to_uppercase(), c);
     }
 
+    let schedules = load_schedules(&spec_root)?;
+    register_schedules(schedules.clone());
+
     Ok(SpecRepository {
         exchanges,
         contracts,
         contract_cycles,
         expiration_rules,
+        schedules,
     })
 }
