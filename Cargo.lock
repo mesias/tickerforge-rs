@@ -349,7 +349,7 @@ dependencies = [
 [[package]]
 name = "tickerforge-spec-data"
 version = "0.1.0"
-source = "git+https://github.com/mesias/tickerforge-spec.git?branch=main#df7eb8b65d2cb10538de139c57a3ae37749a2517"
+source = "git+https://github.com/mesias/tickerforge-spec.git?branch=main#e50cbe4a5fe0978331d5dd1500b3f41cb4619f57"
 
 [[package]]
 name = "unicode-ident"

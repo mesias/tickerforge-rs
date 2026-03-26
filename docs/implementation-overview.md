@@ -28,3 +28,7 @@
 - [x] CSV: `futures_resolve` rows for WIN/IND
 - [x] CSV: `options_resolve` equity + index (dollar/rate gated on calendar docs)
 - [ ] Full `futures_resolve` / `options_resolve` vs `exchange_calendars` (needs calendar backend parity)
+
+## Related docs
+
+- `docs/spec-integration.md` explains how the Rust crate consumes the language-neutral schedule and session-segment spec.
