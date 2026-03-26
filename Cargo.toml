@@ -14,8 +14,9 @@ serde_yaml = "0.9"
 regex = "1.10"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 bdays = "0.1"
-# Bundled default spec (same tree as PyPI/git `tickerforge-spec-data`). Override: `with_spec_path` / `load_spec_from_path`.
-tickerforge-spec-data = { git = "https://github.com/mesias/tickerforge-spec.git", branch = "main" }
+# Default spec tree (must match a published `tickerforge-spec-data` on crates.io for `cargo publish`).
+# Local override: clone tickerforge-spec alongside and use `[patch.crates-io]` (see CI workflow).
+tickerforge-spec-data = "0.1.0"
 
 [dev-dependencies]
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
