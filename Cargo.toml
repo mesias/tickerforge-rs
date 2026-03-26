@@ -1,0 +1,19 @@
+[package]
+name = "tickerforge"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.74"
+description = "Generate and parse derivatives tickers from tickerforge-spec (Rust)."
+license = "MIT"
+repository = "https://github.com/mesias/tickerforge-rs"
+readme = "README.md"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+regex = "1.10"
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+bdays = "0.1"
+
+[dev-dependencies]
+csv = "1.3"

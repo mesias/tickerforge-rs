@@ -1,0 +1,12 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Vendored spec tree (sync from tickerforge-spec; do not commit)
+/spec/
+
+# Coverage (cargo llvm-cov --lcov)
+/lcov.info
+
+# OS
+.DS_Store
