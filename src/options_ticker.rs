@@ -46,6 +46,8 @@ fn synthetic_contract(symbol: &str, exchange: &str, cycle: &str, exp_rule: &str)
         tick_size: None,
         currency: None,
         aliases: vec![],
+        sessions: vec![],
+        exchange_timezone: None,
     }
 }
 

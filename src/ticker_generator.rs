@@ -92,6 +92,37 @@ pub fn generate_ticker_for_contract(
     format_ticker(contract, year, month)
 }
 
+impl ContractSpec {
+    /// Front-month ticker for today using the bundled default spec.
+    pub fn trading_symbol_today(&self) -> Result<String, String> {
+        let spec = load_spec()?;
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        generate_ticker_for_contract(self, &today, &spec, 0)
+    }
+
+    /// Front-month ticker for `as_of` (`YYYY-MM-DD`) using the bundled default spec.
+    pub fn trading_symbol_for(&self, as_of: &str, offset: usize) -> Result<String, String> {
+        let spec = load_spec()?;
+        generate_ticker_for_contract(self, as_of, &spec, offset)
+    }
+
+    /// Front-month ticker for today with an explicit [`SpecRepository`].
+    pub fn trading_symbol_today_with_spec(&self, spec: &SpecRepository) -> Result<String, String> {
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        generate_ticker_for_contract(self, &today, spec, 0)
+    }
+
+    /// Front-month ticker for `as_of` with an explicit [`SpecRepository`].
+    pub fn trading_symbol_for_with_spec(
+        &self,
+        spec: &SpecRepository,
+        as_of: &str,
+        offset: usize,
+    ) -> Result<String, String> {
+        generate_ticker_for_contract(self, as_of, spec, offset)
+    }
+}
+
 /// High-level API matching Python `TickerForge`.
 pub struct TickerForge {
     pub spec: SpecRepository,

@@ -3,30 +3,36 @@ repos:
     hooks:
       - id: cargo-fmt
         name: cargo fmt
-        entry: bash -c 'cargo fmt --all'
+        entry: cargo
+        args: [fmt, --all]
         language: system
         pass_filenames: false
 
       - id: cargo-clippy-fix
         name: cargo clippy --fix
-        entry: bash -c 'cargo clippy --fix --allow-staged --allow-dirty --all-targets'
+        entry: cargo
+        args:
+          [clippy, --fix, --allow-staged, --allow-dirty, --all-targets]
         language: system
         pass_filenames: false
 
       - id: cargo-fmt-post-clippy
         name: cargo fmt (after clippy --fix)
-        entry: bash -c 'cargo fmt --all'
+        entry: cargo
+        args: [fmt, --all]
         language: system
         pass_filenames: false
 
       - id: cargo-clippy
         name: cargo clippy
-        entry: bash -c 'cargo clippy --all-targets -- -D warnings'
+        entry: cargo
+        args: [clippy, --all-targets, --, -D, warnings]
         language: system
         pass_filenames: false
 
       - id: cargo-test
         name: cargo test
-        entry: bash -c 'cargo test'
+        entry: cargo
+        args: [test]
         language: system
         pass_filenames: false

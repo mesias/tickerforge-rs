@@ -15,7 +15,8 @@ pub mod ticker_generator;
 pub mod ticker_parser;
 
 pub use models::{
-    ContractCycle, ContractSpec, Exchange, ExpirationRule, ParsedFuturesTicker, SpecRepository,
+    ContractCycle, ContractSpec, Exchange, ExpirationRule, ParsedFuturesTicker, SessionSegment,
+    SpecRepository,
 };
 pub use options_spec::load_option_rules;
 pub use options_ticker::{OptionGenerator, OptionParser, ParsedOptionTicker};

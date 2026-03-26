@@ -210,6 +210,17 @@ fn load_spec_at(spec_root: PathBuf) -> Result<SpecRepository, String> {
         contracts.insert(c.symbol.to_uppercase(), c);
     }
 
+    for c in contracts.values_mut() {
+        let ex_key = c.exchange.to_uppercase();
+        let sym_key = c.symbol.to_uppercase();
+        if let Some(ex) = exchanges.get(&ex_key) {
+            c.exchange_timezone = ex.timezone.clone();
+            if let Some(asset) = ex.assets.get(&sym_key) {
+                c.sessions = asset.sessions.clone();
+            }
+        }
+    }
+
     let schedules = load_schedules(&spec_root)?;
     register_schedules(schedules.clone());
 

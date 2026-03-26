@@ -44,6 +44,30 @@ assert_eq!(parsed.symbol, "IND");
 
 `TickerForge::new()` loads the bundled default spec from `tickerforge-spec-data`. Use `TickerForge::with_spec_path(path)` (and `TickerParser::with_spec_path(path)`) for a custom spec directory. The default root path is also available as `tickerforge::default_spec_root`.
 
+### Contract-centric (tick, session, trading symbol)
+
+`load_spec` / `get_contract` yield a `ContractSpec` with tick size, merged session windows, timezone, and trading-symbol helpers. **Default** helpers call `load_spec()` internally; use the `*_with_spec` variants to reuse an already-loaded `SpecRepository`:
+
+```rust
+use tickerforge::load_spec;
+
+let spec = load_spec()?;
+let dol = spec.get_contract("DOL")?;
+
+dol.tick_size;
+dol.regular_session_start_end();
+dol.exchange_timezone;
+// `dol.sessions` is `Vec<SessionSegment>` in YAML map key order; map keys become `name`.
+
+// Bundled default spec (no extra `&SpecRepository` argument)
+dol.trading_symbol_today()?;
+dol.trading_symbol_for("2026-03-15", 0)?;
+
+// Reuse `spec` (e.g. from `load_spec_from_path`)
+dol.trading_symbol_today_with_spec(&spec)?;
+dol.trading_symbol_for_with_spec(&spec, "2026-03-15", 0)?;
+```
+
 ### Options (B3)
 
 ```rust

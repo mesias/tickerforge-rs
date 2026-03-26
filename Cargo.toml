@@ -18,5 +18,6 @@ bdays = "0.1"
 tickerforge-spec-data = { git = "https://github.com/mesias/tickerforge-spec.git", branch = "main" }
 
 [dev-dependencies]
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 csv = "1.3"
 xz2 = "0.1.7"
