@@ -420,7 +420,10 @@ fn full_ticker_has_no_session_info() {
 fn root_symbol_on_weekday_is_trading_session() {
     // 2026-04-15 is a Wednesday — B3 session
     let parsed = parse_ticker_date("IND", "2026-04-15").expect("parse");
-    assert_eq!(parsed.reference_date, Some(NaiveDate::from_ymd_opt(2026, 4, 15).unwrap()));
+    assert_eq!(
+        parsed.reference_date,
+        Some(NaiveDate::from_ymd_opt(2026, 4, 15).unwrap())
+    );
     assert_eq!(parsed.is_trading_session, Some(true));
 }
 
@@ -428,7 +431,10 @@ fn root_symbol_on_weekday_is_trading_session() {
 fn root_symbol_on_weekend_is_not_trading_session() {
     // 2026-04-18 is a Saturday
     let parsed = parse_ticker_date("IND", "2026-04-18").expect("parse");
-    assert_eq!(parsed.reference_date, Some(NaiveDate::from_ymd_opt(2026, 4, 18).unwrap()));
+    assert_eq!(
+        parsed.reference_date,
+        Some(NaiveDate::from_ymd_opt(2026, 4, 18).unwrap())
+    );
     assert_eq!(parsed.is_trading_session, Some(false));
 }
 
@@ -436,7 +442,10 @@ fn root_symbol_on_weekend_is_not_trading_session() {
 fn root_symbol_on_holiday_is_not_trading_session() {
     // 2026-04-21 is Tiradentes (B3 holiday, a Tuesday)
     let parsed = parse_ticker_date("IND", "2026-04-21").expect("parse");
-    assert_eq!(parsed.reference_date, Some(NaiveDate::from_ymd_opt(2026, 4, 21).unwrap()));
+    assert_eq!(
+        parsed.reference_date,
+        Some(NaiveDate::from_ymd_opt(2026, 4, 21).unwrap())
+    );
     assert_eq!(parsed.is_trading_session, Some(false));
 }
 
@@ -454,7 +463,10 @@ fn builder_root_symbol_session_info() {
         .reference_date("2026-04-15")
         .parse()
         .expect("parse");
-    assert_eq!(parsed.reference_date, Some(NaiveDate::from_ymd_opt(2026, 4, 15).unwrap()));
+    assert_eq!(
+        parsed.reference_date,
+        Some(NaiveDate::from_ymd_opt(2026, 4, 15).unwrap())
+    );
     assert_eq!(parsed.is_trading_session, Some(true));
 }
 

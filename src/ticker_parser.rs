@@ -304,6 +304,12 @@ pub struct TickerParser {
     pub spec: SpecRepository,
 }
 
+impl Default for TickerParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TickerParser {
     /// Load the **bundled default spec** and return a ready parser.
     ///
