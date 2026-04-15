@@ -247,7 +247,15 @@ pub struct ParsedFuturesTicker {
     pub symbol: String,
     pub year: i32,
     pub month: u32,
+    pub tick_size: Option<f64>,
+    pub lot_size: Option<f64>,
     pub contract: ContractSpec,
+    /// The date used for root-symbol resolution.  `None` when a full ticker
+    /// was parsed (no date context).
+    pub reference_date: Option<chrono::NaiveDate>,
+    /// Whether [`reference_date`] is an actual exchange trading session.
+    /// `None` when a full ticker was parsed.
+    pub is_trading_session: Option<bool>,
 }
 
 #[cfg(test)]
