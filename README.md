@@ -28,21 +28,101 @@ tickerforge = { path = "../tickerforge-rs" }
 
 ## Usage
 
-### Futures
+### Generating tickers
 
 ```rust
-use tickerforge::{TickerForge, TickerParser};
+use tickerforge::TickerForge;
 
 let forge = TickerForge::new().expect("spec");
 let ticker = forge.generate("IND", "2026-06-01", 0).expect("generate");
 assert_eq!(ticker, "INDM26");
-
-let parser = TickerParser::new().expect("spec");
-let parsed = parser.parse(&ticker, Some("2026-06-01")).expect("parse");
-assert_eq!(parsed.symbol, "IND");
 ```
 
 `TickerForge::new()` loads the bundled default spec from `tickerforge-spec-data`. Use `TickerForge::with_spec_path(path)` (and `TickerParser::with_spec_path(path)`) for a custom spec directory. The default root path is also available as `tickerforge::default_spec_root`.
+
+### Parsing tickers (smart parsing)
+
+The parser accepts **full tickers** (`INDM26`) or **root symbols** (`IND`).
+
+Full tickers derive year/month directly from the string — no reference date required.
+Root symbols resolve the front-month contract via the generator; the date defaults to today when omitted.
+
+Four free functions cover every combination of spec / date:
+
+```rust
+use tickerforge::{
+    parse_ticker, parse_ticker_date, parse_ticker_spec, parse_ticker_date_spec,
+    load_spec,
+};
+
+// Full ticker — default spec, no date needed
+let parsed = parse_ticker("INDM26").expect("parse");
+assert_eq!(parsed.symbol, "IND");
+assert_eq!(parsed.year, 2026);
+assert_eq!(parsed.month, 6);
+
+// Root symbol — default spec, explicit date
+let parsed = parse_ticker_date("IND", "2026-06-01").expect("parse");
+
+// Full ticker — custom spec, no date
+let spec = load_spec().expect("spec");
+let parsed = parse_ticker_spec("DOLK26", &spec).expect("parse");
+
+// Root symbol — custom spec, explicit date
+let parsed = parse_ticker_date_spec("DOL", "2026-04-15", &spec).expect("parse");
+```
+
+`TickerParser` wraps a loaded spec for repeated calls.
+`new()` loads the bundled spec and panics on failure (the spec is compiled in, so this should never happen).
+Use `try_new()` for a fallible alternative.
+
+```rust
+use tickerforge::TickerParser;
+
+let parser = TickerParser::new();
+let parsed = parser.parse("INDM26").expect("parse");
+let parsed = parser.parse_date("IND", "2026-06-01").expect("parse");
+```
+
+### Builder pattern
+
+`TickerParser::builder()` provides a fluent API for configuration and one-shot parsing.
+The builder uses **typestate** generics: `parse()` is only available at compile time after `ticker()` has been called.
+
+```rust
+use tickerforge::TickerParser;
+
+// Build a reusable parser (default spec)
+let parser = TickerParser::builder().build().expect("build");
+parser.parse("INDM26").expect("parse");
+
+// Build a reusable parser (custom spec path)
+let parser = TickerParser::builder()
+    .spec_path(std::path::Path::new("/path/to/spec"))
+    .build()
+    .expect("build");
+
+// One-shot parse — full ticker
+let parsed = TickerParser::builder()
+    .ticker("INDM26")
+    .parse()
+    .expect("parse");
+
+// One-shot parse — root symbol with date
+let parsed = TickerParser::builder()
+    .ticker("IND")
+    .reference_date("2026-06-01")
+    .parse()
+    .expect("parse");
+
+// One-shot parse — custom spec + date
+let parsed = TickerParser::builder()
+    .spec_path(std::path::Path::new("/path/to/spec"))
+    .ticker("IND")
+    .reference_date("2026-06-01")
+    .parse()
+    .expect("parse");
+```
 
 ### Contract-centric (tick, session, trading symbol)
 

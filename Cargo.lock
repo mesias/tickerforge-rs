@@ -348,8 +348,9 @@ dependencies = [
 
 [[package]]
 name = "tickerforge-spec-data"
-version = "0.1.0"
-source = "git+https://github.com/mesias/tickerforge-spec.git?branch=main#e50cbe4a5fe0978331d5dd1500b3f41cb4619f57"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9057b62a15c901e317e74a518dde043ce0ebbfd01c2c9913ab522d168a39d2c9"
 
 [[package]]
 name = "unicode-ident"
