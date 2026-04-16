@@ -1,4 +1,4 @@
-//! Futures ticker parsing.
+//! Futures and options ticker parsing.
 //!
 //! # Quick start
 //!
@@ -6,16 +6,20 @@
 //! // Simplest — panics if bundled spec is broken (should never happen)
 //! let parsed = tickerforge::TickerParser::new().parse("INDM26").unwrap();
 //!
+//! // Parse any ticker (futures or option) with AnyParsedTicker
+//! let any = tickerforge::parse_any_ticker("PETRA30").unwrap();
+//!
 //! // Builder — reusable parser with custom spec
 //! let parser = tickerforge::TickerParser::builder()
 //!     .spec("/path/to/spec")
 //!     .build()
 //!     .unwrap();
 //!
-//! // Builder — one-shot parse
+//! // Builder — one-shot parse with exchange filter
 //! let parsed = tickerforge::TickerParser::builder()
 //!     .ticker("IND")
 //!     .reference_date("2026-06-01")
+//!     .exchange("B3")
 //!     .parse()
 //!     .unwrap();
 //! ```
@@ -27,8 +31,9 @@ use regex::Regex;
 
 use crate::calendars::get_calendar;
 use crate::contract_cycle::resolve_contract_months;
-use crate::models::{ParsedFuturesTicker, SpecRepository};
+use crate::models::{ParsedFuturesTicker, ParsedOptionTicker, SpecRepository};
 use crate::month_codes::code_to_month;
+use crate::options_ticker::OptionParser;
 use crate::spec_loader::{load_spec, load_spec_from_path};
 use crate::ticker_generator::generate_ticker_for_contract;
 
@@ -112,29 +117,6 @@ fn try_resolve_root_symbol(
     Ok(result)
 }
 
-fn parse_ticker_inner(
-    ticker: &str,
-    spec: &SpecRepository,
-    reference_date: Option<&str>,
-) -> Result<ParsedFuturesTicker, String> {
-    if let Some(result) = try_parse_full_ticker(ticker, spec)? {
-        if reference_date.is_some() {
-            eprintln!(
-                "warning: reference_date is ignored for full ticker '{}'; \
-                 year and month are derived directly from the ticker string",
-                ticker
-            );
-        }
-        return Ok(result);
-    }
-
-    if let Some(result) = try_resolve_root_symbol(ticker, spec, reference_date)? {
-        return Ok(result);
-    }
-
-    Err(format!("Unable to parse ticker: {ticker}"))
-}
-
 fn load_spec_for_builder(spec_path: Option<&Path>) -> Result<SpecRepository, String> {
     match spec_path {
         Some(p) => load_spec_from_path(p),
@@ -143,43 +125,143 @@ fn load_spec_for_builder(spec_path: Option<&Path>) -> Result<SpecRepository, Str
 }
 
 // ---------------------------------------------------------------------------
-// Public free functions
+// Unified parsing: futures + options
 // ---------------------------------------------------------------------------
 
-/// Parse a full ticker or root symbol using the **bundled default spec**.
+/// A parsed ticker that may be either a futures contract or an option.
+#[derive(Debug, Clone)]
+pub enum AnyParsedTicker {
+    /// A futures contract ticker.
+    Futures(ParsedFuturesTicker),
+    /// An option ticker.
+    Option(ParsedOptionTicker),
+}
+
+fn parse_any_inner(
+    ticker: &str,
+    spec: &SpecRepository,
+    reference_date: Option<&str>,
+    exchange: Option<&str>,
+) -> Result<AnyParsedTicker, String> {
+    // Collect futures candidates.
+    let mut futures_candidates: Vec<ParsedFuturesTicker> = Vec::new();
+    for contract in spec.contracts.values() {
+        if let Some(ex) = exchange {
+            if !contract.exchange.eq_ignore_ascii_case(ex) {
+                continue;
+            }
+        }
+        let re = pattern_for_contract(contract)?;
+        let Some(caps) = re.captures(ticker) else {
+            continue;
+        };
+        let month_code: char = caps["month_code"].chars().next().unwrap();
+        let month = code_to_month(month_code)?;
+        let yy: i32 = caps["yy"]
+            .parse()
+            .map_err(|e: std::num::ParseIntError| e.to_string())?;
+        let year = 2000 + yy;
+        let cycle = spec
+            .contract_cycles
+            .get(&contract.contract_cycle)
+            .ok_or_else(|| format!("unknown cycle {}", contract.contract_cycle))?;
+        let valid_months = resolve_contract_months(cycle, year)?;
+        if !valid_months.contains(&month) {
+            continue;
+        }
+        futures_candidates.push(ParsedFuturesTicker {
+            symbol: contract.symbol.clone(),
+            year,
+            month,
+            tick_size: contract.tick_size,
+            lot_size: contract.contract_multiplier,
+            contract: contract.clone(),
+            reference_date: None,
+            is_trading_session: None,
+        });
+    }
+
+    // Collect option candidates.
+    let option_candidates = OptionParser::parse_options(ticker, spec, exchange);
+
+    let total = futures_candidates.len() + option_candidates.len();
+
+    if total > 1 {
+        let mut descs: Vec<String> = Vec::new();
+        for f in &futures_candidates {
+            descs.push(format!(
+                "  - future on {}: {}",
+                f.contract.exchange, f.symbol
+            ));
+        }
+        for o in &option_candidates {
+            descs.push(format!(
+                "  - {} option on {}: {}",
+                o.kind, o.exchange, o.underlying_or_symbol
+            ));
+        }
+        return Err(format!(
+            "Ambiguous ticker '{ticker}' matched {total} instruments:\n{}\nPass exchange= to disambiguate.",
+            descs.join("\n")
+        ));
+    }
+
+    if let Some(f) = futures_candidates.into_iter().next() {
+        return Ok(AnyParsedTicker::Futures(f));
+    }
+    if let Some(o) = option_candidates.into_iter().next() {
+        return Ok(AnyParsedTicker::Option(o));
+    }
+
+    // Try root symbol resolution (futures only).
+    // try_resolve_root_symbol already populates reference_date / is_trading_session.
+    if let Some(result) = try_resolve_root_symbol(ticker, spec, reference_date)? {
+        if let Some(ex) = exchange {
+            if !result.contract.exchange.eq_ignore_ascii_case(ex) {
+                return Err(format!("Unable to parse ticker: {ticker}"));
+            }
+        }
+        return Ok(AnyParsedTicker::Futures(result));
+    }
+
+    Err(format!("Unable to parse ticker: {ticker}"))
+}
+
+/// Parse any ticker (futures or option) using the **bundled default spec**.
+pub fn parse_any_ticker(ticker: &str) -> Result<AnyParsedTicker, String> {
+    let spec = load_spec()?;
+    parse_any_inner(ticker, &spec, None, None)
+}
+
+/// Parse any ticker with an explicit `reference_date` using the **bundled default spec**.
+pub fn parse_any_ticker_date(ticker: &str, date: &str) -> Result<AnyParsedTicker, String> {
+    let spec = load_spec()?;
+    parse_any_inner(ticker, &spec, Some(date), None)
+}
+
+/// Parse any ticker using a **custom [`SpecRepository`]**.
+pub fn parse_any_ticker_spec(
+    ticker: &str,
+    spec: &SpecRepository,
+) -> Result<AnyParsedTicker, String> {
+    parse_any_inner(ticker, spec, None, None)
+}
+
+/// Parse any ticker with an explicit `reference_date` and a **custom [`SpecRepository`]**.
+pub fn parse_any_ticker_date_spec(
+    ticker: &str,
+    date: &str,
+    spec: &SpecRepository,
+) -> Result<AnyParsedTicker, String> {
+    parse_any_inner(ticker, spec, Some(date), None)
+}
+
+/// Parse any ticker restricted to a single **exchange** (case-insensitive).
 ///
-/// Root symbols resolve the front-month contract for **today**.
-pub fn parse_ticker(ticker: &str) -> Result<ParsedFuturesTicker, String> {
+/// Useful when a ticker might match contracts on multiple markets.
+pub fn parse_any_ticker_exchange(ticker: &str, exchange: &str) -> Result<AnyParsedTicker, String> {
     let spec = load_spec()?;
-    parse_ticker_inner(ticker, &spec, None)
-}
-
-/// Parse a full ticker or root symbol using the **bundled default spec**
-/// with an explicit `reference_date` (`YYYY-MM-DD`).
-pub fn parse_ticker_date(
-    ticker: &str,
-    reference_date: &str,
-) -> Result<ParsedFuturesTicker, String> {
-    let spec = load_spec()?;
-    parse_ticker_inner(ticker, &spec, Some(reference_date))
-}
-
-/// Parse a full ticker or root symbol using a **custom [`SpecRepository`]**.
-pub fn parse_ticker_spec(
-    ticker: &str,
-    spec: &SpecRepository,
-) -> Result<ParsedFuturesTicker, String> {
-    parse_ticker_inner(ticker, spec, None)
-}
-
-/// Parse a full ticker or root symbol using a **custom [`SpecRepository`]**
-/// and an explicit `reference_date` (`YYYY-MM-DD`).
-pub fn parse_ticker_date_spec(
-    ticker: &str,
-    reference_date: &str,
-    spec: &SpecRepository,
-) -> Result<ParsedFuturesTicker, String> {
-    parse_ticker_inner(ticker, spec, Some(reference_date))
+    parse_any_inner(ticker, &spec, None, Some(exchange))
 }
 
 // ===========================================================================
@@ -207,6 +289,7 @@ pub struct TickerParserBuilder<T = NoTicker> {
     spec_path: Option<PathBuf>,
     ticker: Option<String>,
     reference_date: Option<String>,
+    exchange: Option<String>,
     _state: std::marker::PhantomData<T>,
 }
 
@@ -220,6 +303,7 @@ impl<T> TickerParserBuilder<T> {
             spec_path: self.spec_path,
             ticker: self.ticker,
             reference_date: self.reference_date,
+            exchange: self.exchange,
             _state: std::marker::PhantomData,
         }
     }
@@ -242,6 +326,21 @@ impl<T> TickerParserBuilder<T> {
             spec_path: self.spec_path,
             ticker: self.ticker,
             reference_date: self.reference_date,
+            exchange: self.exchange,
+            _state: std::marker::PhantomData,
+        }
+    }
+
+    /// Restrict parsing to a specific exchange (case-insensitive, e.g. `"B3"` or `"CME"`).
+    ///
+    /// Returns an error if the ticker doesn't match any contract on that exchange.
+    pub fn exchange(mut self, exchange: &str) -> TickerParserBuilder<T> {
+        self.exchange = Some(exchange.to_string());
+        TickerParserBuilder {
+            spec_path: self.spec_path,
+            ticker: self.ticker,
+            reference_date: self.reference_date,
+            exchange: self.exchange,
             _state: std::marker::PhantomData,
         }
     }
@@ -265,6 +364,7 @@ impl TickerParserBuilder<NoTicker> {
             spec_path: self.spec_path,
             ticker: Some(ticker.to_string()),
             reference_date: self.reference_date,
+            exchange: self.exchange,
             _state: std::marker::PhantomData,
         }
     }
@@ -280,15 +380,23 @@ impl TickerParserBuilder<HasTicker> {
             spec_path: self.spec_path,
             ticker: self.ticker,
             reference_date: self.reference_date,
+            exchange: self.exchange,
             _state: std::marker::PhantomData,
         }
     }
 
     /// **One-shot**: load spec, parse the ticker, and return the result.
-    pub fn parse(self) -> Result<ParsedFuturesTicker, String> {
+    ///
+    /// Supports futures and options; returns [`AnyParsedTicker`].
+    pub fn parse(self) -> Result<AnyParsedTicker, String> {
         let ticker = self.ticker.expect("ticker is set in HasTicker state");
         let spec = load_spec_for_builder(self.spec_path.as_deref())?;
-        parse_ticker_inner(&ticker, &spec, self.reference_date.as_deref())
+        parse_any_inner(
+            &ticker,
+            &spec,
+            self.reference_date.as_deref(),
+            self.exchange.as_deref(),
+        )
     }
 }
 
@@ -349,21 +457,33 @@ impl TickerParser {
             spec_path: None,
             ticker: None,
             reference_date: None,
+            exchange: None,
             _state: std::marker::PhantomData,
         }
     }
 
     /// Parse using the parser's spec; root symbols resolve for **today**.
-    pub fn parse(&self, ticker: &str) -> Result<ParsedFuturesTicker, String> {
-        parse_ticker_inner(ticker, &self.spec, None)
+    ///
+    /// Supports futures and options; returns [`AnyParsedTicker`].
+    pub fn parse(&self, ticker: &str) -> Result<AnyParsedTicker, String> {
+        parse_any_inner(ticker, &self.spec, None, None)
+    }
+
+    /// Parse using the parser's spec with an optional exchange filter.
+    ///
+    /// Supports futures and options; returns [`AnyParsedTicker`].
+    pub fn parse_exchange(&self, ticker: &str, exchange: &str) -> Result<AnyParsedTicker, String> {
+        parse_any_inner(ticker, &self.spec, None, Some(exchange))
     }
 
     /// Parse using the parser's spec with an explicit `reference_date`.
+    ///
+    /// Supports futures and options; returns [`AnyParsedTicker`].
     pub fn parse_date(
         &self,
         ticker: &str,
         reference_date: &str,
-    ) -> Result<ParsedFuturesTicker, String> {
-        parse_ticker_inner(ticker, &self.spec, Some(reference_date))
+    ) -> Result<AnyParsedTicker, String> {
+        parse_any_inner(ticker, &self.spec, Some(reference_date), None)
     }
 }

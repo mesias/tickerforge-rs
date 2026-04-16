@@ -1,4 +1,4 @@
-//! TickerForge: load tickerforge-spec YAML and generate/parse futures tickers.
+//! TickerForge: load tickerforge-spec YAML and generate/parse futures and options tickers.
 
 pub mod calendars;
 pub mod contract_cycle;
@@ -15,18 +15,15 @@ pub mod ticker_generator;
 pub mod ticker_parser;
 
 pub use models::{
-    ContractCycle, ContractSpec, Exchange, ExpirationRule, ParsedFuturesTicker, SessionSegment,
-    SpecRepository,
+    ContractCycle, ContractSpec, Exchange, ExpirationRule, ParsedFuturesTicker, ParsedOptionTicker,
+    SessionSegment, SpecRepository,
 };
-pub use options_spec::load_option_rules;
-pub use options_ticker::{OptionGenerator, OptionParser, ParsedOptionTicker};
+pub use options_spec::load_all_option_rules;
+pub use options_ticker::{equity_root, OptionGenerator, OptionParser};
 pub use spec_loader::{load_spec, load_spec_from_path};
 pub use ticker_generator::{generate_ticker_for_contract, TickerForge};
 pub use ticker_parser::{
-    parse_ticker, parse_ticker_date, parse_ticker_date_spec, parse_ticker_spec, HasTicker,
-    NoTicker, TickerParser, TickerParserBuilder,
+    parse_any_ticker, parse_any_ticker_date, parse_any_ticker_date_spec, parse_any_ticker_exchange,
+    parse_any_ticker_spec, AnyParsedTicker, HasTicker, NoTicker, TickerParser, TickerParserBuilder,
 };
 pub use tickerforge_spec_data::default_spec_root;
-
-/// Alias matching Python `ParsedTicker` for futures.
-pub type ParsedTicker = ParsedFuturesTicker;

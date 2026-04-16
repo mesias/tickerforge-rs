@@ -334,7 +334,7 @@ dependencies = [
 
 [[package]]
 name = "tickerforge"
-version = "0.1.0"
+version = "0.1.5"
 dependencies = [
  "bdays",
  "chrono",
@@ -348,9 +348,9 @@ dependencies = [
 
 [[package]]
 name = "tickerforge-spec-data"
-version = "0.1.1"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9057b62a15c901e317e74a518dde043ce0ebbfd01c2c9913ab522d168a39d2c9"
+checksum = "6d33b9c73367b0a6ed125864140f42a3b076674bf598849d3907729ed0d6f517"
 
 [[package]]
 name = "unicode-ident"
