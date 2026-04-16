@@ -5,8 +5,9 @@
 # Vendored spec tree (sync from tickerforge-spec; do not commit)
 /spec/
 
-# Coverage (cargo llvm-cov --lcov)
+# Coverage (cargo llvm-cov --lcov / --cobertura)
 /lcov.info
+/cobertura.xml
 
 # OS
 .DS_Store

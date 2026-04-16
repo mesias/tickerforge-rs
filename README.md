@@ -226,13 +226,15 @@ assert_eq!(t, "PETRA35");
 cargo test
 ```
 
-Pre-commit (same idea as `tickerforge-py`):
+Pre-commit (same idea as `tickerforge-py`): format, clippy, then **llvm-cov** with a **80% line coverage** minimum. Install the subcommand first: `cargo install cargo-llvm-cov` (or `cargo binstall cargo-llvm-cov`). Full detail: [`docs/coverage-and-quality-gates.md`](docs/coverage-and-quality-gates.md).
 
 ```bash
 pip install pre-commit
 pre-commit install
 pre-commit run --all-files
 ```
+
+To skip only the coverage hook: `SKIP=cargo-llvm-cov git commit ...`
 
 ## Spec updates
 

@@ -2,9 +2,10 @@
 //!
 //! Mirrors `tests/test_option_parsing.py` in tickerforge-py.
 
+use tickerforge::options_models::OptionRule;
 use tickerforge::{
-    load_spec, parse_any_ticker, parse_any_ticker_exchange, parse_any_ticker_spec, AnyParsedTicker,
-    OptionParser, ParsedOptionTicker,
+    equity_root, load_spec, parse_any_ticker, parse_any_ticker_exchange, parse_any_ticker_spec,
+    AnyParsedTicker, OptionGenerator, OptionParser, ParsedOptionTicker,
 };
 
 // ---------------------------------------------------------------------------
@@ -338,4 +339,124 @@ fn parse_any_ticker_spec_option() {
     let spec = load_spec().expect("spec");
     let any = parse_any_ticker_spec("IBOVK26C120000", &spec).expect("parse");
     assert!(matches!(any, AnyParsedTicker::Option(_)));
+}
+
+// ===========================================================================
+// equity_root
+// ===========================================================================
+
+#[test]
+fn equity_root_strips_one_trailing_digit() {
+    assert_eq!(equity_root("PETR4"), "PETR");
+    assert_eq!(equity_root("BOVA11"), "BOVA1");
+}
+
+#[test]
+fn equity_root_without_digit_unchanged() {
+    assert_eq!(equity_root("FOO"), "FOO");
+    assert_eq!(equity_root(""), "");
+}
+
+// ===========================================================================
+// OptionGenerator — bundled, dollar, rate, errors
+// ===========================================================================
+
+#[test]
+fn option_generator_bundled_generates_equity() {
+    let gen = OptionGenerator::bundled().expect("bundled");
+    let t = gen
+        .generate_equity("PETR4", "2026-01-16", true, 35, 0)
+        .expect("gen");
+    assert_eq!(t, "PETRA35");
+}
+
+#[test]
+fn option_generator_dollar_and_interest_rate_round_trip_parse() {
+    let gen = OptionGenerator::bundled().expect("bundled");
+    let dol = gen
+        .generate_dollar("2026-03-15", true, 5200, 0)
+        .expect("dol");
+    let o = unwrap_option(parse_any_ticker(&dol).expect("parse dollar gen"));
+    assert_eq!(o.kind, "dollar");
+    assert_eq!(o.underlying_or_symbol, "DOL");
+    assert!(o.is_call);
+    assert_eq!(o.strike, "005200");
+
+    let idi = gen
+        .generate_interest_rate("2026-06-15", true, 100_000, 0)
+        .expect("idi");
+    let o2 = unwrap_option(parse_any_ticker(&idi).expect("parse idi gen"));
+    assert_eq!(o2.kind, "interest_rate");
+    assert_eq!(o2.underlying_or_symbol, "IDI");
+    assert!(o2.is_call);
+    assert_eq!(o2.strike, "100000");
+}
+
+#[test]
+fn generate_from_row_dispatches_dollar_interest_and_unknown_kind() {
+    let gen = OptionGenerator::bundled().expect("bundled");
+    let dol = gen
+        .generate_dollar("2026-03-15", true, 5200, 0)
+        .expect("dol");
+    assert_eq!(
+        gen.generate_from_row("dollar", "DOL", "2026-03-15", "call", 5200, 0)
+            .expect("row"),
+        dol
+    );
+    let idi = gen
+        .generate_interest_rate("2026-06-15", true, 100_000, 0)
+        .expect("idi");
+    assert_eq!(
+        gen.generate_from_row("interest_rate", "IDI", "2026-06-15", "call", 100_000, 0)
+            .expect("row"),
+        idi
+    );
+    let err = gen
+        .generate_from_row("unknown", "X", "2026-01-01", "call", 1, 0)
+        .unwrap_err();
+    assert!(err.contains("unknown option kind"));
+}
+
+#[test]
+fn generate_equity_rejects_unknown_underlying() {
+    let gen = OptionGenerator::bundled().expect("bundled");
+    let err = gen
+        .generate_equity("NOTLISTED9", "2026-01-16", true, 1, 0)
+        .unwrap_err();
+    assert!(err.contains("underlying not listed"));
+}
+
+#[test]
+fn generate_equity_rejects_bad_date() {
+    let gen = OptionGenerator::bundled().expect("bundled");
+    assert!(gen
+        .generate_equity("PETR4", "not-a-date", true, 35, 0)
+        .is_err());
+}
+
+#[test]
+fn generate_equity_rejects_offset_out_of_range() {
+    let gen = OptionGenerator::bundled().expect("bundled");
+    let err = gen
+        .generate_equity("PETR4", "2026-01-16", true, 35, 99999)
+        .unwrap_err();
+    assert!(err.contains("offset out of range"));
+}
+
+// ===========================================================================
+// OptionParser — ambiguity
+// ===========================================================================
+
+#[test]
+fn option_parser_ambiguous_when_two_equities_share_root() {
+    let mut spec = load_spec().expect("spec");
+    for rule in &mut spec.options {
+        if let OptionRule::Equity(e) = rule {
+            e.underlyings.push("PETR3".to_string());
+            break;
+        }
+    }
+    let err = OptionParser::parse_option("PETRA30", &spec).unwrap_err();
+    assert!(err.contains("Ambiguous ticker"));
+    assert!(err.contains("option instruments"));
 }
