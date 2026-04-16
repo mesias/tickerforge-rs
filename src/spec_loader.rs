@@ -1,4 +1,4 @@
-//! Load YAML spec from disk (futures contracts only; options loaded separately).
+//! Load YAML spec from disk (futures contracts + options from all markets).
 
 use std::collections::HashMap;
 use std::fs;
@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use crate::calendars::register_schedules;
 use crate::models::{Asset, ContractCycle, ContractSpec, Exchange, ExpirationRule, SpecRepository};
+use crate::options_spec::load_all_option_rules;
 use crate::schedule::load_schedules;
 
 fn read_yaml_mapping(path: &Path) -> Result<serde_yaml::Mapping, String> {
@@ -221,12 +222,15 @@ fn load_spec_at(spec_root: PathBuf) -> Result<SpecRepository, String> {
         }
     }
 
+    let options = load_all_option_rules(&spec_root)?;
+
     let schedules = load_schedules(&spec_root)?;
     register_schedules(schedules.clone());
 
     Ok(SpecRepository {
         exchanges,
         contracts,
+        options,
         contract_cycles,
         expiration_rules,
         schedules,

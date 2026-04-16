@@ -3,6 +3,7 @@
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 
+use crate::options_models::OptionRule;
 use crate::schedule::ExchangeSchedule;
 
 /// One clock-time trading window; YAML uses the map key as `name`.
@@ -215,11 +216,13 @@ fn default_ticker_format() -> String {
     "{symbol}{month_code}{yy}".to_string()
 }
 
-/// Loaded spec repository (futures + shared cycles/rules).
+/// Loaded spec repository (futures + options + shared cycles/rules).
 #[derive(Debug, Clone)]
 pub struct SpecRepository {
     pub exchanges: HashMap<String, Exchange>,
     pub contracts: HashMap<String, ContractSpec>,
+    /// Option rules loaded from all `options:` blocks in `contracts/**/*.yaml`.
+    pub options: Vec<OptionRule>,
     pub contract_cycles: HashMap<String, ContractCycle>,
     pub expiration_rules: HashMap<String, ExpirationRule>,
     pub schedules: HashMap<String, ExchangeSchedule>,
@@ -241,7 +244,7 @@ impl SpecRepository {
     }
 }
 
-/// Parsed futures ticker (matches Python `ParsedTicker`).
+/// Parsed futures ticker.
 #[derive(Debug, Clone)]
 pub struct ParsedFuturesTicker {
     pub symbol: String,
@@ -256,6 +259,30 @@ pub struct ParsedFuturesTicker {
     /// Whether [`reference_date`] is an actual exchange trading session.
     /// `None` when a full ticker was parsed.
     pub is_trading_session: Option<bool>,
+}
+
+/// Parsed option ticker.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParsedOptionTicker {
+    /// `"equity"`, `"index"`, `"dollar"`, or `"interest_rate"`.
+    pub kind: String,
+    /// Full underlying symbol (`"PETR4"`) for equity; root symbol (`"IBOV"`, `"DOL"`, `"IDI"`)
+    /// for other types.
+    pub underlying_or_symbol: String,
+    /// Contract year (`2000 + yy`).  `None` for equity options (no year in ticker).
+    pub year: Option<i32>,
+    /// Contract month (1–12).
+    pub month: u32,
+    /// `true` = call, `false` = put.
+    pub is_call: bool,
+    /// Raw strike string as it appears in the ticker (e.g. `"5000"`, `"120000"`).
+    pub strike: String,
+    /// Exchange code (e.g. `"B3"`).
+    pub exchange: String,
+    /// Minimum price increment from the option rule.
+    pub tick_size: Option<f64>,
+    /// Contract multiplier from the option rule.
+    pub lot_size: Option<f64>,
 }
 
 #[cfg(test)]
