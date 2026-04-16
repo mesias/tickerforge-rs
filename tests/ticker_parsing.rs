@@ -1,9 +1,11 @@
 mod common;
 
 use chrono::NaiveDate;
+use tickerforge::options_models::OptionRule;
 use tickerforge::{
     load_spec, parse_any_ticker, parse_any_ticker_date, parse_any_ticker_date_spec,
-    parse_any_ticker_spec, AnyParsedTicker, ParsedFuturesTicker, TickerForge, TickerParser,
+    parse_any_ticker_exchange, parse_any_ticker_spec, AnyParsedTicker, ParsedFuturesTicker,
+    TickerForge, TickerParser,
 };
 
 use crate::common::spec_path;
@@ -511,4 +513,75 @@ fn builder_full_ticker_no_session_info() {
     );
     assert!(parsed.reference_date.is_none());
     assert!(parsed.is_trading_session.is_none());
+}
+
+#[test]
+fn ticker_parser_default_matches_new() {
+    let a = as_futures(TickerParser::default().parse("INDM26").expect("parse"));
+    let b = as_futures(TickerParser::new().parse("INDM26").expect("parse"));
+    assert_eq!(a.symbol, b.symbol);
+    assert_eq!(a.year, b.year);
+    assert_eq!(a.month, b.month);
+}
+
+#[test]
+fn parse_exchange_on_parser_matches_freestanding() {
+    let parser = TickerParser::new();
+    let a = parser.parse_exchange("INDM26", "B3").expect("parse");
+    let b = parse_any_ticker_exchange("INDM26", "B3").expect("parse");
+    assert!(matches!(a, AnyParsedTicker::Futures(_)));
+    assert!(matches!(b, AnyParsedTicker::Futures(_)));
+}
+
+#[test]
+fn parse_any_ticker_date_invalid_reference_falls_back_to_local_date() {
+    // Malformed date string: coerce_reference_date ignores it and uses "today"
+    let parsed = as_futures(parse_any_ticker_date("IND", "not-a-valid-date").expect("parse"));
+    assert_eq!(parsed.symbol, "IND");
+}
+
+#[test]
+fn parse_any_ticker_exchange_root_wrong_exchange_fails() {
+    let err = parse_any_ticker_exchange("IND", "CME").unwrap_err();
+    assert!(err.contains("Unable to parse ticker"));
+}
+
+#[test]
+fn builder_exchange_filters_root_symbol() {
+    let parsed = as_futures(
+        TickerParser::builder()
+            .exchange("B3")
+            .ticker("IND")
+            .reference_date("2026-06-01")
+            .parse()
+            .expect("parse"),
+    );
+    assert_eq!(parsed.symbol, "IND");
+    assert_eq!(parsed.contract.exchange, "B3");
+}
+
+#[test]
+fn builder_has_ticker_replace_ticker() {
+    let parsed = as_futures(
+        TickerParser::builder()
+            .ticker("ZZZZ")
+            .ticker("INDM26")
+            .parse()
+            .expect("parse"),
+    );
+    assert_eq!(parsed.symbol, "IND");
+}
+
+#[test]
+fn ambiguous_ticker_when_two_equities_share_root() {
+    let mut spec = load_spec().expect("spec");
+    for rule in &mut spec.options {
+        if let OptionRule::Equity(e) = rule {
+            e.underlyings.push("PETR3".to_string());
+            break;
+        }
+    }
+    let err = parse_any_ticker_spec("PETRA30", &spec).unwrap_err();
+    assert!(err.contains("Ambiguous ticker"));
+    assert!(err.contains("Pass exchange="));
 }

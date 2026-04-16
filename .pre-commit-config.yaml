@@ -37,9 +37,11 @@ repos:
         language: system
         pass_filenames: false
 
-      - id: cargo-test
-        name: cargo test
-        entry: cargo
-        args: [test]
+      - id: cargo-llvm-cov
+        name: cargo llvm-cov (min 80% line coverage)
+        entry: bash
+        args:
+          - -c
+          - cargo llvm-cov --all-features --lcov --output-path lcov.info --fail-under-lines 80 && cargo llvm-cov report --cobertura --output-path cobertura.xml
         language: system
         pass_filenames: false
