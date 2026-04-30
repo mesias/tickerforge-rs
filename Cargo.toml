@@ -1,6 +1,6 @@
 [package]
 name = "tickerforge"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 rust-version = "1.74"
 description = "Generate and parse derivatives tickers from tickerforge-spec (Rust)."
@@ -16,7 +16,7 @@ chrono = { version = "0.4", default-features = false, features = ["std", "clock"
 bdays = "0.1"
 # Default spec tree (must match a published `tickerforge-spec-data` on crates.io for `cargo publish`).
 # Local override: clone tickerforge-spec alongside and use `[patch.crates-io]` (see CI workflow).
-tickerforge-spec-data = "^0.1.6"
+tickerforge-spec-data = "^0.1.7"
 
 [dev-dependencies]
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }

@@ -119,6 +119,48 @@ impl Asset {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct EquitySpec {
+    pub symbol: String,
+    pub exchange: String,
+    #[serde(default)]
+    pub r#type: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub currency: Option<String>,
+    #[serde(default)]
+    pub tick_size: Option<f64>,
+    #[serde(default)]
+    pub contract_multiplier: Option<f64>,
+    #[serde(default)]
+    pub aliases: Vec<String>,
+    #[serde(default, deserialize_with = "deserialize_asset_sessions")]
+    pub sessions: Vec<SessionSegment>,
+    #[serde(default)]
+    pub exchange_timezone: Option<String>,
+}
+
+impl EquitySpec {
+    pub fn regular_session(&self) -> Option<&SessionSegment> {
+        self.sessions.first()
+    }
+    pub fn is_unique_session(&self) -> bool {
+        self.sessions.len() == 1
+    }
+    pub fn default_session(&self) -> Option<&SessionSegment> {
+        if self.sessions.len() == 1 {
+            self.sessions.first()
+        } else {
+            None
+        }
+    }
+    pub fn regular_session_start_end(&self) -> Option<(&str, &str)> {
+        let seg = self.regular_session()?;
+        Some((seg.start.as_str(), seg.end.as_str()))
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct Exchange {
     pub code: String,
     #[serde(default)]
@@ -223,6 +265,7 @@ pub struct SpecRepository {
     pub contracts: HashMap<String, ContractSpec>,
     /// Option rules loaded from all `options:` blocks in `contracts/**/*.yaml`.
     pub options: Vec<OptionRule>,
+    pub equities: HashMap<String, EquitySpec>,
     pub contract_cycles: HashMap<String, ContractCycle>,
     pub expiration_rules: HashMap<String, ExpirationRule>,
     pub schedules: HashMap<String, ExchangeSchedule>,
@@ -242,6 +285,13 @@ impl SpecRepository {
             .get(&key)
             .ok_or_else(|| format!("Unknown contract: {symbol}"))
     }
+
+    pub fn get_equity(&self, symbol: &str) -> Result<&EquitySpec, String> {
+        let key = symbol.to_uppercase();
+        self.equities
+            .get(&key)
+            .ok_or_else(|| format!("Unknown equity: {symbol}"))
+    }
 }
 
 /// Parsed futures ticker.
@@ -259,6 +309,13 @@ pub struct ParsedFuturesTicker {
     /// Whether [`reference_date`] is an actual exchange trading session.
     /// `None` when a full ticker was parsed.
     pub is_trading_session: Option<bool>,
+}
+
+/// Parsed equity ticker.
+#[derive(Debug, Clone)]
+pub struct ParsedEquityTicker {
+    pub symbol: String,
+    pub equity: EquitySpec,
 }
 
 /// Parsed option ticker.

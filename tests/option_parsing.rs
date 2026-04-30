@@ -16,6 +16,7 @@ fn unwrap_option(any: AnyParsedTicker) -> ParsedOptionTicker {
     match any {
         AnyParsedTicker::Option(o) => o,
         AnyParsedTicker::Futures(f) => panic!("expected Option, got Futures: {:?}", f),
+        AnyParsedTicker::Equity(e) => panic!("expected Option, got Equity: {:?}", e),
     }
 }
 
@@ -23,6 +24,7 @@ fn unwrap_futures_symbol(any: AnyParsedTicker) -> String {
     match any {
         AnyParsedTicker::Futures(f) => f.symbol,
         AnyParsedTicker::Option(o) => panic!("expected Futures, got Option: {:?}", o),
+        AnyParsedTicker::Equity(e) => panic!("expected Futures, got Equity: {:?}", e),
     }
 }
 
@@ -214,6 +216,7 @@ fn cme_futures_parse_via_any() {
             assert_eq!(f.contract.exchange, "CME");
         }
         AnyParsedTicker::Option(_) => panic!("expected Futures"),
+        AnyParsedTicker::Equity(_) => panic!("expected Futures"),
     }
 }
 
