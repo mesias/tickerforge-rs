@@ -18,6 +18,9 @@ fn as_futures(any: AnyParsedTicker) -> ParsedFuturesTicker {
         AnyParsedTicker::Option(o) => {
             panic!("expected Futures but got Option: {:?}", o)
         }
+        AnyParsedTicker::Equity(e) => {
+            panic!("expected Futures but got Equity: {:?}", e)
+        }
     }
 }
 

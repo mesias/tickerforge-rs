@@ -5,7 +5,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::calendars::register_schedules;
-use crate::models::{Asset, ContractCycle, ContractSpec, Exchange, ExpirationRule, SpecRepository};
+use crate::models::{
+    Asset, ContractCycle, ContractSpec, EquitySpec, Exchange, ExpirationRule, SpecRepository,
+};
 use crate::options_spec::load_all_option_rules;
 use crate::schedule::load_schedules;
 
@@ -167,6 +169,37 @@ fn load_contracts(spec_root: &Path) -> Result<Vec<ContractSpec>, String> {
     Ok(contracts)
 }
 
+fn load_equities(spec_root: &Path) -> Result<Vec<EquitySpec>, String> {
+    let mut equities = Vec::new();
+    let equities_dir = spec_root.join("equities");
+    if !equities_dir.exists() {
+        return Ok(equities);
+    }
+    let mut stack = vec![equities_dir];
+    while let Some(dir) = stack.pop() {
+        let entries = fs::read_dir(&dir).map_err(|e| format!("read {}: {e}", dir.display()))?;
+        for entry in entries.filter_map(|e| e.ok()) {
+            let p = entry.path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if p.extension().map(|x| x == "yaml").unwrap_or(false) {
+                let m = read_yaml_mapping(&p)?;
+                let Some(serde_yaml::Value::Sequence(items)) =
+                    m.get(serde_yaml::Value::String("equities".into()))
+                else {
+                    continue;
+                };
+                for item in items {
+                    let e: EquitySpec = serde_yaml::from_value(item.clone())
+                        .map_err(|err| format!("equity item in {}: {err}", p.display()))?;
+                    equities.push(e);
+                }
+            }
+        }
+    }
+    Ok(equities)
+}
+
 fn default_spec_path() -> PathBuf {
     tickerforge_spec_data::default_spec_root()
 }
@@ -224,6 +257,15 @@ fn load_spec_at(spec_root: PathBuf) -> Result<SpecRepository, String> {
 
     let options = load_all_option_rules(&spec_root)?;
 
+    let mut equities: HashMap<String, EquitySpec> = HashMap::new();
+    for mut eq in load_equities(&spec_root)? {
+        let ex_key = eq.exchange.to_uppercase();
+        if let Some(ex) = exchanges.get(&ex_key) {
+            eq.exchange_timezone = ex.timezone.clone();
+        }
+        equities.insert(eq.symbol.to_uppercase(), eq);
+    }
+
     let schedules = load_schedules(&spec_root)?;
     register_schedules(schedules.clone());
 
@@ -231,6 +273,7 @@ fn load_spec_at(spec_root: PathBuf) -> Result<SpecRepository, String> {
         exchanges,
         contracts,
         options,
+        equities,
         contract_cycles,
         expiration_rules,
         schedules,

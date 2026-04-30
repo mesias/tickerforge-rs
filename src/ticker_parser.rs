@@ -31,7 +31,7 @@ use regex::Regex;
 
 use crate::calendars::get_calendar;
 use crate::contract_cycle::resolve_contract_months;
-use crate::models::{ParsedFuturesTicker, ParsedOptionTicker, SpecRepository};
+use crate::models::{ParsedEquityTicker, ParsedFuturesTicker, ParsedOptionTicker, SpecRepository};
 use crate::month_codes::code_to_month;
 use crate::options_ticker::OptionParser;
 use crate::spec_loader::{load_spec, load_spec_from_path};
@@ -135,6 +135,8 @@ pub enum AnyParsedTicker {
     Futures(ParsedFuturesTicker),
     /// An option ticker.
     Option(ParsedOptionTicker),
+    /// An equity ticker.
+    Equity(ParsedEquityTicker),
 }
 
 fn parse_any_inner(
@@ -143,6 +145,23 @@ fn parse_any_inner(
     reference_date: Option<&str>,
     exchange: Option<&str>,
 ) -> Result<AnyParsedTicker, String> {
+    // Check equities first.
+    let key = ticker.to_uppercase();
+    if let Some(eq) = spec.equities.get(&key) {
+        let mut matches_exchange = true;
+        if let Some(ex) = exchange {
+            if !eq.exchange.eq_ignore_ascii_case(ex) {
+                matches_exchange = false;
+            }
+        }
+        if matches_exchange {
+            return Ok(AnyParsedTicker::Equity(ParsedEquityTicker {
+                symbol: eq.symbol.clone(),
+                equity: eq.clone(),
+            }));
+        }
+    }
+
     // Collect futures candidates.
     let mut futures_candidates: Vec<ParsedFuturesTicker> = Vec::new();
     for contract in spec.contracts.values() {
