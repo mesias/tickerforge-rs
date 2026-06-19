@@ -645,8 +645,8 @@ fn parse_new_b3_futures() {
     assert_eq!(parsed_eth.tick_size, Some(0.50));
 
     // Let's also resolve expiration dates to verify they work
-    use tickerforge::expiration_rules::resolve_expiration;
     use tickerforge::calendars::get_calendar;
+    use tickerforge::expiration_rules::resolve_expiration;
 
     let spec = load_spec().expect("spec");
     let cal = get_calendar("B3");
@@ -659,21 +659,30 @@ fn parse_new_b3_futures() {
     );
 
     // SJC: second business day prior to March 2026 (Feb 2026 has 20 business days; 2nd to last is Feb 26)
-    let sjc_rule = spec.expiration_rules.get("second_business_day_prior_to_month").expect("rule");
+    let sjc_rule = spec
+        .expiration_rules
+        .get("second_business_day_prior_to_month")
+        .expect("rule");
     assert_eq!(
         resolve_expiration(&parsed_sjc.contract, 2026, 3, sjc_rule, &cal).unwrap(),
         NaiveDate::from_ymd_opt(2026, 2, 26).unwrap()
     );
 
     // SOY: business day prior to 16th of Feb 2026
-    let soy_rule = spec.expiration_rules.get("business_day_prior_to_16th_of_preceding_month").expect("rule");
+    let soy_rule = spec
+        .expiration_rules
+        .get("business_day_prior_to_16th_of_preceding_month")
+        .expect("rule");
     assert_eq!(
         resolve_expiration(&parsed_soy.contract, 2026, 3, soy_rule, &cal).unwrap(),
         NaiveDate::from_ymd_opt(2026, 2, 13).unwrap()
     );
 
     // GLD: 3rd to last business day of Jan 2026
-    let gld_rule = spec.expiration_rules.get("third_to_last_business_day").expect("rule");
+    let gld_rule = spec
+        .expiration_rules
+        .get("third_to_last_business_day")
+        .expect("rule");
     assert_eq!(
         resolve_expiration(&parsed_gld.contract, 2026, 1, gld_rule, &cal).unwrap(),
         NaiveDate::from_ymd_opt(2026, 1, 28).unwrap()
@@ -699,7 +708,10 @@ fn parse_new_b3_futures() {
     );
 
     // ETH: last business day of Jan 2026
-    let eth_rule = spec.expiration_rules.get("last_business_day").expect("rule");
+    let eth_rule = spec
+        .expiration_rules
+        .get("last_business_day")
+        .expect("rule");
     assert_eq!(
         resolve_expiration(&parsed_eth.contract, 2026, 1, eth_rule, &cal).unwrap(),
         NaiveDate::from_ymd_opt(2026, 1, 30).unwrap()
