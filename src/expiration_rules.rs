@@ -266,9 +266,9 @@ pub fn resolve_expiration(
             resolve_second_business_day_prior_to_month(cal, year, month)
         }
         "business_day_prior_to_day_of_preceding_month" => {
-            let day = expiration_rule
-                .day
-                .ok_or_else(|| "business_day_prior_to_day_of_preceding_month requires day".to_string())?;
+            let day = expiration_rule.day.ok_or_else(|| {
+                "business_day_prior_to_day_of_preceding_month requires day".to_string()
+            })?;
             resolve_business_day_prior_to_day_of_preceding_month(cal, year, month, day)
         }
         "nth_business_day_from_end" => {
