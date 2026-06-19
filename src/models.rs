@@ -130,8 +130,8 @@ pub struct EquitySpec {
     pub currency: Option<String>,
     #[serde(default)]
     pub tick_size: Option<f64>,
-    #[serde(default)]
-    pub contract_multiplier: Option<f64>,
+    #[serde(default, rename = "contract_multiplier")]
+    pub lot_size: Option<f64>,
     #[serde(default)]
     pub aliases: Vec<String>,
     #[serde(default, deserialize_with = "deserialize_asset_sessions")]
@@ -212,8 +212,8 @@ pub struct ContractSpec {
     pub ticker_format: String,
     pub contract_cycle: String,
     pub expiration_rule: String,
-    #[serde(default)]
-    pub contract_multiplier: Option<f64>,
+    #[serde(default, rename = "contract_multiplier")]
+    pub lot_size: Option<f64>,
     #[serde(default)]
     pub tick_size: Option<f64>,
     #[serde(default)]
@@ -354,7 +354,7 @@ mod tests {
             ticker_format: default_ticker_format(),
             contract_cycle: "m".into(),
             expiration_rule: "r".into(),
-            contract_multiplier: None,
+            lot_size: None,
             tick_size: None,
             currency: None,
             aliases: vec![],

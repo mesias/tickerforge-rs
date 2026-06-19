@@ -8,7 +8,7 @@
 [![rustfmt](https://img.shields.io/badge/rustfmt-000000?logo=rust&logoColor=white)](https://github.com/rust-lang/rustfmt)
 [![clippy](https://img.shields.io/badge/clippy-000000?logo=rust&logoColor=white)](https://github.com/rust-lang/rust-clippy)
 
-Rust library that loads the default [`tickerforge-spec`](https://github.com/mesias/tickerforge-spec) YAML tree from the [`tickerforge-spec-data`](https://github.com/mesias/tickerforge-spec) crate (git dependency, same content as the Python `tickerforge-spec-data` wheel) and generates or parses **futures and options** tickers from **all supported markets** (parity with [`tickerforge-py`](https://github.com/mesias/tickerforge-py)). Option rules are loaded automatically from all `spec/contracts/**/*.yaml` files.
+Rust library that loads the default [`tickerforge-spec`](https://github.com/mesias/tickerforge-spec) YAML tree from the [`tickerforge-spec-data`](https://github.com/mesias/tickerforge-spec) crate (git dependency, same content as the Python `tickerforge-spec-data` wheel) and generates or parses **futures, options, and cash equities** tickers from **all supported markets** (parity with [`tickerforge-py`](https://github.com/mesias/tickerforge-py)). Option and equity rules are loaded automatically from all `spec/contracts/**/*.yaml` and `spec/equities/**/*.yaml` files.
 
 Trading sessions use the [`bdays`](https://crates.io/crates/bdays) crate (B3 `BrazilExchange`, US `USSettlement` for CME). Full alignment with Python’s `exchange_calendars` is not guaranteed; see [`docs/calendar-strategy.md`](docs/calendar-strategy.md).
 
@@ -40,12 +40,21 @@ assert_eq!(ticker, "INDM26");
 
 `TickerForge::new()` loads the bundled default spec from `tickerforge-spec-data`. Use `TickerForge::with_spec_path(path)` (and `TickerParser::with_spec_path(path)`) for a custom spec directory. The default root path is also available as `tickerforge::default_spec_root`.
 
-### Parsing tickers — futures and options (`parse_any_ticker*`)
+### Parsing tickers — futures, options, and equities (`parse_any_ticker*`)
 
-`parse_any_ticker*` parses **both futures and options** in a single call and returns an `AnyParsedTicker` enum.
+`parse_any_ticker*` parses **futures, options, and cash equities** in a single call and returns an `AnyParsedTicker` enum.
 
 ```rust
 use tickerforge::{parse_any_ticker, parse_any_ticker_exchange, AnyParsedTicker};
+
+// Cash equity
+match parse_any_ticker("PETR4").unwrap() {
+    AnyParsedTicker::Equity(e) => {
+        assert_eq!(e.symbol, "PETR4");
+        assert_eq!(e.exchange, "B3");
+    }
+    _ => unreachable!(),
+}
 
 // Futures ticker
 match parse_any_ticker("INDM26").unwrap() {
@@ -214,7 +223,7 @@ assert_eq!(t, "PETRA35");
 
 ## What is supported
 
-- YAML spec loading (exchanges, contract cycles, expiration rules, futures and **options** from all `contracts/**/*.yaml`)
+- YAML spec loading (exchanges, contract cycles, expiration rules, futures, **options**, and **equities** from the spec tree)
 - Multi-market futures generation and parsing: **B3** (IND, DOL, WIN, …) and **CME** (ES, NQ, …)
 - Multi-market options **parsing** via `parse_any_ticker*` and `OptionParser`: B3 equity, index (IBOV), dollar (DOL), interest-rate (IDI); more markets added automatically from spec
 - B3 options **generation** via `OptionGenerator` (equity month codes, IBOV month letters **A–L**, DOL/IDI futures-style month codes)

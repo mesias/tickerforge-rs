@@ -199,7 +199,7 @@ fn parsed_ticker_has_tick_size_and_lot_size() {
     let contract = spec.get_contract("IND").expect("contract");
     let parsed = as_futures(parse_any_ticker_spec("INDM26", &spec).expect("parse"));
     assert_eq!(parsed.tick_size, contract.tick_size);
-    assert_eq!(parsed.lot_size, contract.contract_multiplier);
+    assert_eq!(parsed.lot_size, contract.lot_size);
 }
 
 // ===========================================================================
@@ -587,4 +587,121 @@ fn ambiguous_ticker_when_two_equities_share_root() {
     let err = parse_any_ticker_spec("PETRA30", &spec).unwrap_err();
     assert!(err.contains("Ambiguous ticker"));
     assert!(err.contains("Pass exchange="));
+}
+
+#[test]
+fn parse_new_b3_futures() {
+    let parser = TickerParser::with_spec_path(&spec_path()).expect("parser");
+
+    // 1. ETR (Ethereum, last Friday of Jan 2026 -> 2026-01-30)
+    let parsed_etr = as_futures(parser.parse("ETRF26").expect("parse"));
+    assert_eq!(parsed_etr.symbol, "ETR");
+    assert_eq!(parsed_etr.year, 2026);
+    assert_eq!(parsed_etr.month, 1);
+    assert_eq!(parsed_etr.lot_size, Some(1.0));
+
+    // 2. SOL (Solana, last Friday of Jan 2026 -> 2026-01-30)
+    let parsed_sol = as_futures(parser.parse("SOLF26").expect("parse"));
+    assert_eq!(parsed_sol.symbol, "SOL");
+    assert_eq!(parsed_sol.lot_size, Some(1.0));
+
+    // 3. SJC (Soybean CBOT, 2nd business day prior to March 2026 -> 2026-02-26)
+    let parsed_sjc = as_futures(parser.parse("SJCH26").expect("parse"));
+    assert_eq!(parsed_sjc.symbol, "SJC");
+    assert_eq!(parsed_sjc.lot_size, Some(1.0));
+
+    // 4. SOY (Soybean FOB Santos, business day prior to 16th of Feb 2026 -> 2026-02-13)
+    let parsed_soy = as_futures(parser.parse("SOYH26").expect("parse"));
+    assert_eq!(parsed_soy.symbol, "SOY");
+    assert_eq!(parsed_soy.lot_size, Some(1.0));
+
+    // 5. GLD (Gold, 3rd to last business day of Jan 2026 -> 2026-01-28)
+    let parsed_gld = as_futures(parser.parse("GLDF26").expect("parse"));
+    assert_eq!(parsed_gld.symbol, "GLD");
+    assert_eq!(parsed_gld.lot_size, Some(1.0));
+
+    // 6. BIT (Bitcoin, last Friday of Jan 2026 -> 2026-01-30)
+    let parsed_bit = as_futures(parser.parse("BITF26").expect("parse"));
+    assert_eq!(parsed_bit.symbol, "BIT");
+    assert_eq!(parsed_bit.lot_size, Some(1.0));
+    assert_eq!(parsed_bit.tick_size, Some(2.0));
+
+    // 7. ISP (S&P 500, third Friday of March 2026 -> 2026-03-20)
+    let parsed_isp = as_futures(parser.parse("ISPH26").expect("parse"));
+    assert_eq!(parsed_isp.symbol, "ISP");
+    assert_eq!(parsed_isp.lot_size, Some(50.0));
+    assert_eq!(parsed_isp.tick_size, Some(0.25));
+
+    // 8. WSP (Micro S&P 500, third Friday of March 2026 -> 2026-03-20)
+    let parsed_wsp = as_futures(parser.parse("WSPH26").expect("parse"));
+    assert_eq!(parsed_wsp.symbol, "WSP");
+    assert_eq!(parsed_wsp.lot_size, Some(2.5));
+    assert_eq!(parsed_wsp.tick_size, Some(0.25));
+
+    // 9. ETH (Hydrous Ethanol, last business day of Jan 2026 -> 2026-01-30)
+    let parsed_eth = as_futures(parser.parse("ETHF26").expect("parse"));
+    assert_eq!(parsed_eth.symbol, "ETH");
+    assert_eq!(parsed_eth.lot_size, Some(1.0));
+    assert_eq!(parsed_eth.tick_size, Some(0.50));
+
+    // Let's also resolve expiration dates to verify they work
+    use tickerforge::expiration_rules::resolve_expiration;
+    use tickerforge::calendars::get_calendar;
+
+    let spec = load_spec().expect("spec");
+    let cal = get_calendar("B3");
+
+    // ETR: last Friday of Jan 2026
+    let etr_rule = spec.expiration_rules.get("last_friday").expect("rule");
+    assert_eq!(
+        resolve_expiration(&parsed_etr.contract, 2026, 1, etr_rule, &cal).unwrap(),
+        NaiveDate::from_ymd_opt(2026, 1, 30).unwrap()
+    );
+
+    // SJC: second business day prior to March 2026 (Feb 2026 has 20 business days; 2nd to last is Feb 26)
+    let sjc_rule = spec.expiration_rules.get("second_business_day_prior_to_month").expect("rule");
+    assert_eq!(
+        resolve_expiration(&parsed_sjc.contract, 2026, 3, sjc_rule, &cal).unwrap(),
+        NaiveDate::from_ymd_opt(2026, 2, 26).unwrap()
+    );
+
+    // SOY: business day prior to 16th of Feb 2026
+    let soy_rule = spec.expiration_rules.get("business_day_prior_to_16th_of_preceding_month").expect("rule");
+    assert_eq!(
+        resolve_expiration(&parsed_soy.contract, 2026, 3, soy_rule, &cal).unwrap(),
+        NaiveDate::from_ymd_opt(2026, 2, 13).unwrap()
+    );
+
+    // GLD: 3rd to last business day of Jan 2026
+    let gld_rule = spec.expiration_rules.get("third_to_last_business_day").expect("rule");
+    assert_eq!(
+        resolve_expiration(&parsed_gld.contract, 2026, 1, gld_rule, &cal).unwrap(),
+        NaiveDate::from_ymd_opt(2026, 1, 28).unwrap()
+    );
+
+    // BIT: last Friday of Jan 2026
+    assert_eq!(
+        resolve_expiration(&parsed_bit.contract, 2026, 1, etr_rule, &cal).unwrap(),
+        NaiveDate::from_ymd_opt(2026, 1, 30).unwrap()
+    );
+
+    // ISP: third Friday of March 2026
+    let isp_rule = spec.expiration_rules.get("third_friday").expect("rule");
+    assert_eq!(
+        resolve_expiration(&parsed_isp.contract, 2026, 3, isp_rule, &cal).unwrap(),
+        NaiveDate::from_ymd_opt(2026, 3, 20).unwrap()
+    );
+
+    // WSP: third Friday of March 2026
+    assert_eq!(
+        resolve_expiration(&parsed_wsp.contract, 2026, 3, isp_rule, &cal).unwrap(),
+        NaiveDate::from_ymd_opt(2026, 3, 20).unwrap()
+    );
+
+    // ETH: last business day of Jan 2026
+    let eth_rule = spec.expiration_rules.get("last_business_day").expect("rule");
+    assert_eq!(
+        resolve_expiration(&parsed_eth.contract, 2026, 1, eth_rule, &cal).unwrap(),
+        NaiveDate::from_ymd_opt(2026, 1, 30).unwrap()
+    );
 }
