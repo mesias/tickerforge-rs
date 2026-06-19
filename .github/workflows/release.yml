@@ -30,7 +30,8 @@ jobs:
     permissions:
       contents: write
     outputs:
-      tag_created: ${{ steps.create_tag.outputs.tag_created }}
+      should_publish_crate: ${{ steps.create_tag.outputs.should_publish_crate }}
+      should_create_release: ${{ steps.create_tag.outputs.should_create_release }}
       tag_name: ${{ steps.create_tag.outputs.tag_name }}
     steps:
       - name: Checkout
@@ -39,27 +40,48 @@ jobs:
           fetch-depth: 0
       - name: Check and create tag
         id: create_tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           VER=$(tr -d '[:space:]' < VERSION)
           TAG="v$VER"
+          echo "tag_name=$TAG" >> "$GITHUB_OUTPUT"
+
+          # 1. Check and create git tag if missing
           if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "Tag $TAG already exists. Skipping release."
-            echo "tag_created=false" >> "$GITHUB_OUTPUT"
+            echo "Tag $TAG already exists."
           else
             echo "Tag $TAG does not exist. Creating..."
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git tag "$TAG"
             git push origin "$TAG"
-            echo "tag_created=true" >> "$GITHUB_OUTPUT"
-            echo "tag_name=$TAG" >> "$GITHUB_OUTPUT"
+          fi
+
+          # 2. Check if already published to crates.io
+          STATUS=$(curl -o /dev/null -sw "%{http_code}" -H "User-Agent: github-actions-release-workflow" "https://crates.io/api/v1/crates/tickerforge/$VER" || true)
+          if [ "$STATUS" = "200" ]; then
+            echo "Crate version $VER is already published on crates.io."
+            echo "should_publish_crate=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Crate version $VER is not published on crates.io."
+            echo "should_publish_crate=true" >> "$GITHUB_OUTPUT"
+          fi
+
+          # 3. Check if GitHub release already exists
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "GitHub release $TAG already exists."
+            echo "should_create_release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "GitHub release $TAG does not exist."
+            echo "should_create_release=true" >> "$GITHUB_OUTPUT"
           fi
 
   publish-crate:
     name: Publish (crates.io)
     needs: tag
-    if: needs.tag.outputs.tag_created == 'true'
+    if: needs.tag.outputs.should_publish_crate == 'true'
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -79,7 +101,7 @@ jobs:
   github_release:
     name: GitHub Release
     needs: [tag, publish-crate]
-    if: needs.tag.outputs.tag_created == 'true'
+    if: needs.tag.outputs.should_create_release == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
