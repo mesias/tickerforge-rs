@@ -46,7 +46,7 @@ fn synthetic_contract(symbol: &str, exchange: &str, cycle: &str, exp_rule: &str)
         ticker_format: "{symbol}{month_code}{yy}".to_string(),
         contract_cycle: cycle.to_string(),
         expiration_rule: exp_rule.to_string(),
-        contract_multiplier: None,
+        lot_size: None,
         tick_size: None,
         currency: None,
         aliases: vec![],
@@ -161,7 +161,7 @@ fn match_equity_options(
             strike: caps["strike"].to_string(),
             exchange: rule.exchange.clone(),
             tick_size: rule.tick_size,
-            lot_size: rule.contract_multiplier,
+            lot_size: rule.lot_size,
         });
     }
     results
@@ -239,7 +239,7 @@ impl OptionParser {
                     &r.exchange,
                     &r.option_type_codes,
                     r.tick_size,
-                    r.contract_multiplier,
+                    r.lot_size,
                 )
                 .into_iter()
                 .collect(),
@@ -250,7 +250,7 @@ impl OptionParser {
                     &r.exchange,
                     &r.option_type_codes,
                     r.tick_size,
-                    r.contract_multiplier,
+                    r.lot_size,
                 )
                 .into_iter()
                 .collect(),
@@ -261,7 +261,7 @@ impl OptionParser {
                     &r.exchange,
                     &r.option_type_codes,
                     r.tick_size,
-                    r.contract_multiplier,
+                    r.lot_size,
                 )
                 .into_iter()
                 .collect(),

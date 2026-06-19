@@ -2,8 +2,8 @@ name: Release
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
 
 jobs:
   validate:
@@ -23,19 +23,43 @@ jobs:
       - name: Verify VERSION matches Cargo.toml
         run: python3 scripts/check_versions.py
 
-      - name: Verify tag matches VERSION
+  tag:
+    name: Create Git Tag
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag_created: ${{ steps.create_tag.outputs.tag_created }}
+      tag_name: ${{ steps.create_tag.outputs.tag_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check and create tag
+        id: create_tag
         run: |
           set -euo pipefail
-          TAG="${GITHUB_REF_NAME#v}"
           VER=$(tr -d '[:space:]' < VERSION)
-          if [ "$TAG" != "$VER" ]; then
-            echo "::error::Git tag v$TAG must match VERSION ($VER)"
-            exit 1
+          TAG="v$VER"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists. Skipping release."
+            echo "tag_created=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Tag $TAG does not exist. Creating..."
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag "$TAG"
+            git push origin "$TAG"
+            echo "tag_created=true" >> "$GITHUB_OUTPUT"
+            echo "tag_name=$TAG" >> "$GITHUB_OUTPUT"
           fi
 
   publish-crate:
     name: Publish (crates.io)
-    needs: validate
+    needs: tag
+    if: needs.tag.outputs.tag_created == 'true'
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -54,7 +78,8 @@ jobs:
 
   github_release:
     name: GitHub Release
-    needs: publish-crate
+    needs: [tag, publish-crate]
+    if: needs.tag.outputs.tag_created == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -62,6 +87,6 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
+          tag_name: ${{ needs.tag.outputs.tag_name }}
+          name: ${{ needs.tag.outputs.tag_name }}
           generate_release_notes: true

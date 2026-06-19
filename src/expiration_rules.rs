@@ -135,6 +135,83 @@ fn resolve_nth_weekday_of_month(
 }
 
 /// Compute expiration calendar date for a contract month.
+fn resolve_last_weekday_of_month(
+    cal: &ExchangeCalendar,
+    year: i32,
+    month: u32,
+    weekday_name: &str,
+) -> Result<NaiveDate, String> {
+    let wd = weekday_name_to_number(weekday_name)
+        .ok_or_else(|| format!("bad weekday name {weekday_name}"))?;
+    let sessions = month_sessions(cal, year, month);
+    let weekday_sessions: Vec<NaiveDate> =
+        sessions.into_iter().filter(|d| d.weekday() == wd).collect();
+    if weekday_sessions.is_empty() {
+        return Err(format!(
+            "No sessions on weekday '{weekday_name}' for {year}-{month:02}"
+        ));
+    }
+    Ok(*weekday_sessions.last().unwrap())
+}
+
+fn resolve_second_business_day_prior_to_month(
+    cal: &ExchangeCalendar,
+    year: i32,
+    month: u32,
+) -> Result<NaiveDate, String> {
+    let (prev_year, prev_month) = if month == 1 {
+        (year - 1, 12)
+    } else {
+        (year, month - 1)
+    };
+    let sessions = month_sessions(cal, prev_year, prev_month);
+    if sessions.len() < 2 {
+        return Err(format!(
+            "Not enough sessions in preceding month for {year}-{month:02}"
+        ));
+    }
+    Ok(sessions[sessions.len() - 2])
+}
+
+fn resolve_business_day_prior_to_day_of_preceding_month(
+    cal: &ExchangeCalendar,
+    year: i32,
+    month: u32,
+    day: i32,
+) -> Result<NaiveDate, String> {
+    let (prev_year, prev_month) = if month == 1 {
+        (year - 1, 12)
+    } else {
+        (year, month - 1)
+    };
+    let last_day = days_in_month(prev_year, prev_month) as i32;
+    let d = day.min(last_day).max(1) as u32;
+    let target = NaiveDate::from_ymd_opt(prev_year, prev_month, d).unwrap();
+    let sessions = month_sessions(cal, prev_year, prev_month);
+    let filtered_sessions: Vec<NaiveDate> = sessions.into_iter().filter(|s| *s < target).collect();
+    if filtered_sessions.is_empty() {
+        return Err("No sessions found before target day in preceding month".to_string());
+    }
+    Ok(*filtered_sessions.last().unwrap())
+}
+
+fn resolve_nth_business_day_from_end(
+    cal: &ExchangeCalendar,
+    year: i32,
+    month: u32,
+    n: i32,
+) -> Result<NaiveDate, String> {
+    let sessions = month_sessions(cal, year, month);
+    let n = n as usize;
+    if n < 1 || n > sessions.len() {
+        return Err(format!(
+            "Invalid nth business day from end '{n}' for {year}-{month:02}"
+        ));
+    }
+    Ok(sessions[sessions.len() - n])
+}
+
+/// Compute expiration calendar date for a contract month.
 pub fn resolve_expiration(
     contract: &ContractSpec,
     year: i32,
@@ -177,6 +254,28 @@ pub fn resolve_expiration(
                 .n
                 .ok_or_else(|| "nth_weekday_of_month requires n".to_string())?;
             resolve_nth_weekday_of_month(cal, year, month, weekday, n)
+        }
+        "last_weekday_of_month" => {
+            let weekday = expiration_rule
+                .weekday
+                .as_deref()
+                .ok_or_else(|| "last_weekday_of_month requires weekday".to_string())?;
+            resolve_last_weekday_of_month(cal, year, month, weekday)
+        }
+        "second_business_day_prior_to_month" => {
+            resolve_second_business_day_prior_to_month(cal, year, month)
+        }
+        "business_day_prior_to_day_of_preceding_month" => {
+            let day = expiration_rule
+                .day
+                .ok_or_else(|| "business_day_prior_to_day_of_preceding_month requires day".to_string())?;
+            resolve_business_day_prior_to_day_of_preceding_month(cal, year, month, day)
+        }
+        "nth_business_day_from_end" => {
+            let n = expiration_rule
+                .n
+                .ok_or_else(|| "nth_business_day_from_end requires n".to_string())?;
+            resolve_nth_business_day_from_end(cal, year, month, n)
         }
         "schedule" => Err("schedule expiration rules need external schedule data".to_string()),
         other => Err(format!("Unsupported expiration rule type: {other}")),
