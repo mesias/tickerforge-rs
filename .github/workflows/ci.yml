@@ -31,11 +31,12 @@ jobs:
         with:
           path: rs
 
-      - name: Checkout tickerforge-spec (patch target for bundled spec)
-        uses: actions/checkout@v4
-        with:
-          repository: mesias/tickerforge-spec
-          path: spec
+      - name: Fetch tickerforge-spec (patch target for bundled spec)
+        run: |
+          BRANCH="${{ github.head_ref || github.ref_name }}"
+          git clone --depth 1 --branch "$BRANCH" https://github.com/mesias/tickerforge-spec.git spec || \
+          git clone --depth 1 --branch develop https://github.com/mesias/tickerforge-spec.git spec || \
+          git clone --depth 1 --branch main https://github.com/mesias/tickerforge-spec.git spec
 
       - name: Workspace (patch git dep with sibling spec crate)
         run: |
@@ -67,11 +68,12 @@ jobs:
         with:
           path: rs
 
-      - name: Checkout tickerforge-spec
-        uses: actions/checkout@v4
-        with:
-          repository: mesias/tickerforge-spec
-          path: spec
+      - name: Fetch tickerforge-spec
+        run: |
+          BRANCH="${{ github.head_ref || github.ref_name }}"
+          git clone --depth 1 --branch "$BRANCH" https://github.com/mesias/tickerforge-spec.git spec || \
+          git clone --depth 1 --branch develop https://github.com/mesias/tickerforge-spec.git spec || \
+          git clone --depth 1 --branch main https://github.com/mesias/tickerforge-spec.git spec
 
       - name: Workspace (patch git dep with sibling spec crate)
         run: |
