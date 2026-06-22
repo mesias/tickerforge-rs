@@ -19,7 +19,7 @@ chrono = { version = "0.4", default-features = false, features = [
 bdays = "0.1"
 # Default spec tree (must match a published `tickerforge-spec-data` on crates.io for `cargo publish`).
 # Local override: clone tickerforge-spec alongside and use `[patch.crates-io]` (see CI workflow).
-tickerforge-spec-data = "^0.1.8"
+tickerforge-spec-data = "^0.1.10"
 
 [dev-dependencies]
 chrono = { version = "0.4", default-features = false, features = [
