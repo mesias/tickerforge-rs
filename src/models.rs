@@ -3,6 +3,7 @@
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 
+use crate::options_models::OptionRule;
 use crate::schedule::ExchangeSchedule;
 
 /// One clock-time trading window; YAML uses the map key as `name`.
@@ -118,6 +119,48 @@ impl Asset {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct EquitySpec {
+    pub symbol: String,
+    pub exchange: String,
+    #[serde(default)]
+    pub r#type: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub currency: Option<String>,
+    #[serde(default)]
+    pub tick_size: Option<f64>,
+    #[serde(default, rename = "contract_multiplier")]
+    pub lot_size: Option<f64>,
+    #[serde(default)]
+    pub aliases: Vec<String>,
+    #[serde(default, deserialize_with = "deserialize_asset_sessions")]
+    pub sessions: Vec<SessionSegment>,
+    #[serde(default)]
+    pub exchange_timezone: Option<String>,
+}
+
+impl EquitySpec {
+    pub fn regular_session(&self) -> Option<&SessionSegment> {
+        self.sessions.first()
+    }
+    pub fn is_unique_session(&self) -> bool {
+        self.sessions.len() == 1
+    }
+    pub fn default_session(&self) -> Option<&SessionSegment> {
+        if self.sessions.len() == 1 {
+            self.sessions.first()
+        } else {
+            None
+        }
+    }
+    pub fn regular_session_start_end(&self) -> Option<(&str, &str)> {
+        let seg = self.regular_session()?;
+        Some((seg.start.as_str(), seg.end.as_str()))
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct Exchange {
     pub code: String,
     #[serde(default)]
@@ -169,8 +212,8 @@ pub struct ContractSpec {
     pub ticker_format: String,
     pub contract_cycle: String,
     pub expiration_rule: String,
-    #[serde(default)]
-    pub contract_multiplier: Option<f64>,
+    #[serde(default, rename = "contract_multiplier")]
+    pub lot_size: Option<f64>,
     #[serde(default)]
     pub tick_size: Option<f64>,
     #[serde(default)]
@@ -215,11 +258,14 @@ fn default_ticker_format() -> String {
     "{symbol}{month_code}{yy}".to_string()
 }
 
-/// Loaded spec repository (futures + shared cycles/rules).
+/// Loaded spec repository (futures + options + shared cycles/rules).
 #[derive(Debug, Clone)]
 pub struct SpecRepository {
     pub exchanges: HashMap<String, Exchange>,
     pub contracts: HashMap<String, ContractSpec>,
+    /// Option rules loaded from all `options:` blocks in `contracts/**/*.yaml`.
+    pub options: Vec<OptionRule>,
+    pub equities: HashMap<String, EquitySpec>,
     pub contract_cycles: HashMap<String, ContractCycle>,
     pub expiration_rules: HashMap<String, ExpirationRule>,
     pub schedules: HashMap<String, ExchangeSchedule>,
@@ -239,9 +285,16 @@ impl SpecRepository {
             .get(&key)
             .ok_or_else(|| format!("Unknown contract: {symbol}"))
     }
+
+    pub fn get_equity(&self, symbol: &str) -> Result<&EquitySpec, String> {
+        let key = symbol.to_uppercase();
+        self.equities
+            .get(&key)
+            .ok_or_else(|| format!("Unknown equity: {symbol}"))
+    }
 }
 
-/// Parsed futures ticker (matches Python `ParsedTicker`).
+/// Parsed futures ticker.
 #[derive(Debug, Clone)]
 pub struct ParsedFuturesTicker {
     pub symbol: String,
@@ -258,6 +311,37 @@ pub struct ParsedFuturesTicker {
     pub is_trading_session: Option<bool>,
 }
 
+/// Parsed equity ticker.
+#[derive(Debug, Clone)]
+pub struct ParsedEquityTicker {
+    pub symbol: String,
+    pub equity: EquitySpec,
+}
+
+/// Parsed option ticker.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParsedOptionTicker {
+    /// `"equity"`, `"index"`, `"dollar"`, or `"interest_rate"`.
+    pub kind: String,
+    /// Full underlying symbol (`"PETR4"`) for equity; root symbol (`"IBOV"`, `"DOL"`, `"IDI"`)
+    /// for other types.
+    pub underlying_or_symbol: String,
+    /// Contract year (`2000 + yy`).  `None` for equity options (no year in ticker).
+    pub year: Option<i32>,
+    /// Contract month (1–12).
+    pub month: u32,
+    /// `true` = call, `false` = put.
+    pub is_call: bool,
+    /// Raw strike string as it appears in the ticker (e.g. `"5000"`, `"120000"`).
+    pub strike: String,
+    /// Exchange code (e.g. `"B3"`).
+    pub exchange: String,
+    /// Minimum price increment from the option rule.
+    pub tick_size: Option<f64>,
+    /// Contract multiplier from the option rule.
+    pub lot_size: Option<f64>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -270,7 +354,7 @@ mod tests {
             ticker_format: default_ticker_format(),
             contract_cycle: "m".into(),
             expiration_rule: "r".into(),
-            contract_multiplier: None,
+            lot_size: None,
             tick_size: None,
             currency: None,
             aliases: vec![],

@@ -1,4 +1,6 @@
-//! Options ticker generation (B3) and parsing.
+//! Options ticker generation (B3) and parsing (all markets).
+
+use regex::Regex;
 
 use chrono::{Datelike, NaiveDate};
 
@@ -6,16 +8,18 @@ use crate::calendars::get_calendar;
 use crate::contract_cycle::resolve_contract_months;
 use crate::dates::is_month_in_calendar_range;
 use crate::expiration_rules::{month_sessions, resolve_expiration};
-use crate::models::{ContractSpec, SpecRepository};
-use crate::month_codes::month_to_code;
+use crate::models::{ContractSpec, ParsedOptionTicker, SpecRepository};
+use crate::month_codes::{code_to_month, month_to_code};
 use crate::options_models::{OptionRule, OptionTypeCodes};
-use crate::options_spec::load_option_rules;
 
 fn parse_date(s: &str) -> Result<NaiveDate, String> {
     NaiveDate::parse_from_str(s.trim(), "%Y-%m-%d").map_err(|e| e.to_string())
 }
 
-/// Strip last digit from equity root (PETR4 → PETR).
+/// Strip one trailing digit from an equity underlying symbol.
+///
+/// `"PETR4"` → `"PETR"`, `"BOVA11"` → `"BOVA1"`.
+/// Mirrors Python `_equity_root`.
 pub fn equity_root(underlying: &str) -> String {
     let mut cs: Vec<char> = underlying.chars().collect();
     if let Some(last) = cs.last() {
@@ -42,7 +46,7 @@ fn synthetic_contract(symbol: &str, exchange: &str, cycle: &str, exp_rule: &str)
         ticker_format: "{symbol}{month_code}{yy}".to_string(),
         contract_cycle: cycle.to_string(),
         expiration_rule: exp_rule.to_string(),
-        contract_multiplier: None,
+        lot_size: None,
         tick_size: None,
         currency: None,
         aliases: vec![],
@@ -87,49 +91,255 @@ fn collect_eligible_months(
     Ok(eligible)
 }
 
-/// Parsed option ticker (structured fields).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ParsedOptionTicker {
-    pub kind: String,
-    pub underlying_or_symbol: String,
-    pub year: i32,
-    pub month: u32,
-    pub is_call: bool,
-    pub strike: i64,
+// ---------------------------------------------------------------------------
+// Parsing helpers
+// ---------------------------------------------------------------------------
+
+/// Build a combined character class string for all equity call + put codes.
+fn equity_all_codes(call_codes: &[String], put_codes: &[String]) -> String {
+    let mut s = String::new();
+    for c in call_codes.iter().chain(put_codes.iter()) {
+        if let Some(ch) = c.chars().next() {
+            s.push(ch);
+        }
+    }
+    s
 }
 
+/// Map an equity option month code character back to `(month, is_call)`.
+fn equity_decode_month_code(
+    ch: char,
+    call_codes: &[String],
+    put_codes: &[String],
+) -> Option<(u32, bool)> {
+    let upper = ch.to_ascii_uppercase().to_string();
+    if let Some(idx) = call_codes.iter().position(|c| *c == upper) {
+        return Some(((idx as u32) + 1, true));
+    }
+    if let Some(idx) = put_codes.iter().position(|c| *c == upper) {
+        return Some(((idx as u32) + 1, false));
+    }
+    None
+}
+
+const FUTURES_MONTH_CODES: &str = "FGHJKMNQUVXZ";
+
+/// Try to match `ticker` against all equity option underlyings in `rule`.
+fn match_equity_options(
+    ticker: &str,
+    rule: &crate::options_models::EquityOptionRule,
+) -> Vec<ParsedOptionTicker> {
+    let all_codes = equity_all_codes(&rule.call_month_codes, &rule.put_month_codes);
+    let codes_escaped: String = regex::escape(&all_codes);
+
+    let mut results = Vec::new();
+    for underlying in &rule.underlyings {
+        let root = equity_root(underlying);
+        let pattern = format!(
+            "^{}(?P<month_code>[{codes_escaped}])(?P<strike>\\d+)$",
+            regex::escape(&root)
+        );
+        let re = match Regex::new(&pattern) {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        let Some(caps) = re.captures(ticker) else {
+            continue;
+        };
+        let mc_char = caps["month_code"].chars().next().unwrap();
+        let Some((month, is_call)) =
+            equity_decode_month_code(mc_char, &rule.call_month_codes, &rule.put_month_codes)
+        else {
+            continue;
+        };
+        results.push(ParsedOptionTicker {
+            kind: "equity".to_string(),
+            underlying_or_symbol: underlying.clone(),
+            year: None,
+            month,
+            is_call,
+            strike: caps["strike"].to_string(),
+            exchange: rule.exchange.clone(),
+            tick_size: rule.tick_size,
+            lot_size: rule.lot_size,
+        });
+    }
+    results
+}
+
+/// Try to match `ticker` against a non-equity option rule (index / dollar / interest_rate).
+fn match_nonequity_option(
+    ticker: &str,
+    kind: &str,
+    symbol: &str,
+    exchange: &str,
+    opt_codes: &OptionTypeCodes,
+    tick_size: Option<f64>,
+    lot_size: Option<f64>,
+) -> Option<ParsedOptionTicker> {
+    let call_esc = regex::escape(&opt_codes.call);
+    let put_esc = regex::escape(&opt_codes.put);
+    let pattern = format!(
+        "^{}(?P<month_code>[{FUTURES_MONTH_CODES}])(?P<yy>\\d{{2}})(?P<opt_type>{call_esc}|{put_esc})(?P<strike>\\d+)$",
+        regex::escape(symbol)
+    );
+    let re = Regex::new(&pattern).ok()?;
+    let caps = re.captures(ticker)?;
+
+    let mc_char = caps["month_code"].chars().next().unwrap();
+    let month = code_to_month(mc_char).ok()?;
+    let yy: i32 = caps["yy"].parse().ok()?;
+    let year = 2000 + yy;
+    let opt_type_str = &caps["opt_type"];
+    let is_call = opt_type_str == opt_codes.call;
+
+    Some(ParsedOptionTicker {
+        kind: kind.to_string(),
+        underlying_or_symbol: symbol.to_string(),
+        year: Some(year),
+        month,
+        is_call,
+        strike: caps["strike"].to_string(),
+        exchange: exchange.to_string(),
+        tick_size,
+        lot_size,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// OptionParser
+// ---------------------------------------------------------------------------
+
+/// Parser for option tickers.
+///
+/// Uses the option rules already loaded into [`SpecRepository`] — no separate
+/// file loading required.
+pub struct OptionParser;
+
+impl OptionParser {
+    /// Collect all option ticker candidates for `ticker`.
+    ///
+    /// Returns a list that may be empty (no match), have one element (unambiguous),
+    /// or multiple elements (ambiguous across markets or option types).
+    /// Optionally filter by `exchange` (case-insensitive).
+    pub fn parse_options(
+        ticker: &str,
+        spec: &SpecRepository,
+        exchange: Option<&str>,
+    ) -> Vec<ParsedOptionTicker> {
+        let mut results: Vec<ParsedOptionTicker> = Vec::new();
+
+        for rule in &spec.options {
+            let mut candidates = match rule {
+                OptionRule::Equity(r) => match_equity_options(ticker, r),
+                OptionRule::Index(r) => match_nonequity_option(
+                    ticker,
+                    "index",
+                    &r.symbol,
+                    &r.exchange,
+                    &r.option_type_codes,
+                    r.tick_size,
+                    r.lot_size,
+                )
+                .into_iter()
+                .collect(),
+                OptionRule::Dollar(r) => match_nonequity_option(
+                    ticker,
+                    "dollar",
+                    &r.symbol,
+                    &r.exchange,
+                    &r.option_type_codes,
+                    r.tick_size,
+                    r.lot_size,
+                )
+                .into_iter()
+                .collect(),
+                OptionRule::InterestRate(r) => match_nonequity_option(
+                    ticker,
+                    "interest_rate",
+                    &r.symbol,
+                    &r.exchange,
+                    &r.option_type_codes,
+                    r.tick_size,
+                    r.lot_size,
+                )
+                .into_iter()
+                .collect(),
+            };
+
+            if let Some(ex) = exchange {
+                candidates.retain(|c| c.exchange.eq_ignore_ascii_case(ex));
+            }
+
+            results.extend(candidates);
+        }
+
+        results
+    }
+
+    /// Parse an option ticker, returning a single [`ParsedOptionTicker`].
+    ///
+    /// Returns `Err` if the ticker is unknown or matches multiple instruments.
+    pub fn parse_option(ticker: &str, spec: &SpecRepository) -> Result<ParsedOptionTicker, String> {
+        Self::parse_option_exchange(ticker, spec, None)
+    }
+
+    /// Parse an option ticker with an optional exchange filter.
+    pub fn parse_option_exchange(
+        ticker: &str,
+        spec: &SpecRepository,
+        exchange: Option<&str>,
+    ) -> Result<ParsedOptionTicker, String> {
+        let candidates = Self::parse_options(ticker, spec, exchange);
+        match candidates.len() {
+            1 => Ok(candidates.into_iter().next().unwrap()),
+            0 => Err(format!("Unable to parse option ticker: {ticker}")),
+            n => {
+                let descs: Vec<String> = candidates
+                    .iter()
+                    .map(|c| {
+                        format!(
+                            "  - {} option on {}: {}",
+                            c.kind, c.exchange, c.underlying_or_symbol
+                        )
+                    })
+                    .collect();
+                Err(format!(
+                    "Ambiguous ticker '{ticker}' matched {n} option instruments:\n{}\nPass exchange= to disambiguate.",
+                    descs.join("\n")
+                ))
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// OptionGenerator
+// ---------------------------------------------------------------------------
+
+/// Generates option tickers from a loaded [`SpecRepository`].
+///
+/// Option rules are taken directly from `spec.options` — no separate loading needed.
 pub struct OptionGenerator {
     pub spec: SpecRepository,
-    pub rules: Vec<OptionRule>,
 }
 
 impl OptionGenerator {
-    pub fn new(spec: SpecRepository, rules: Vec<OptionRule>) -> Self {
-        Self { spec, rules }
+    /// Wrap an already-loaded [`SpecRepository`].
+    pub fn new(spec: SpecRepository) -> Self {
+        Self { spec }
     }
 
-    /// Load futures spec and B3 options rules from the bundled default paths.
+    /// Load the bundled default spec.
     pub fn bundled() -> Result<Self, String> {
-        Self::from_spec_and_options_paths(None, None)
+        Ok(Self::new(crate::spec_loader::load_spec()?))
     }
 
-    /// Load from a custom spec root directory (uses `spec_root/contracts/b3/options.yaml` for options).
+    /// Load from a custom spec root directory.
     pub fn with_spec_root(spec_root: &std::path::Path) -> Result<Self, String> {
-        let options = spec_root.join("contracts").join("b3").join("options.yaml");
-        Self::from_spec_and_options_paths(Some(spec_root), Some(&options))
-    }
-
-    /// Load with optional spec root and optional `options.yaml` path (same defaults as [`bundled()`]).
-    pub fn from_spec_and_options_paths(
-        spec_path: Option<&std::path::Path>,
-        options_path: Option<&std::path::Path>,
-    ) -> Result<Self, String> {
-        let spec = match spec_path {
-            Some(p) => crate::spec_loader::load_spec_from_path(p)?,
-            None => crate::spec_loader::load_spec()?,
-        };
-        let rules = load_option_rules(options_path)?;
-        Ok(Self::new(spec, rules))
+        Ok(Self::new(crate::spec_loader::load_spec_from_path(
+            spec_root,
+        )?))
     }
 
     /// Ibovespa options use equity-style month letters **A–L** in the ticker (not futures F–Z).
@@ -182,7 +392,8 @@ impl OptionGenerator {
         offset: usize,
     ) -> Result<String, String> {
         let rule = self
-            .rules
+            .spec
+            .options
             .iter()
             .find_map(|r| match r {
                 OptionRule::Equity(e) => Some(e),
@@ -231,7 +442,8 @@ impl OptionGenerator {
         offset: usize,
     ) -> Result<String, String> {
         let rule = self
-            .rules
+            .spec
+            .options
             .iter()
             .find_map(|r| match r {
                 OptionRule::Index(i) if i.symbol.eq_ignore_ascii_case(symbol) => Some(i),
@@ -260,7 +472,8 @@ impl OptionGenerator {
         offset: usize,
     ) -> Result<String, String> {
         let rule = self
-            .rules
+            .spec
+            .options
             .iter()
             .find_map(|r| match r {
                 OptionRule::Dollar(d) => Some(d),
@@ -289,7 +502,8 @@ impl OptionGenerator {
         offset: usize,
     ) -> Result<String, String> {
         let rule = self
-            .rules
+            .spec
+            .options
             .iter()
             .find_map(|r| match r {
                 OptionRule::InterestRate(i) => Some(i),
@@ -330,6 +544,3 @@ impl OptionGenerator {
         }
     }
 }
-
-/// Placeholder parser (round-trip tests use generation).
-pub struct OptionParser;

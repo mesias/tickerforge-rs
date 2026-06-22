@@ -18,8 +18,8 @@ pub struct EquityOptionRule {
     pub description: Option<String>,
     pub option_style: String,
     pub ticker_format: String,
-    #[serde(default)]
-    pub contract_multiplier: Option<f64>,
+    #[serde(default, rename = "contract_multiplier")]
+    pub lot_size: Option<f64>,
     #[serde(default)]
     pub tick_size: Option<f64>,
     #[serde(default)]
@@ -41,8 +41,8 @@ pub struct IndexOptionRule {
     pub description: Option<String>,
     pub option_style: String,
     pub ticker_format: String,
-    #[serde(default)]
-    pub contract_multiplier: Option<f64>,
+    #[serde(default, rename = "contract_multiplier")]
+    pub lot_size: Option<f64>,
     #[serde(default)]
     pub tick_size: Option<f64>,
     #[serde(default)]
@@ -62,8 +62,8 @@ pub struct DollarOptionRule {
     pub description: Option<String>,
     pub option_style: String,
     pub ticker_format: String,
-    #[serde(default)]
-    pub contract_multiplier: Option<f64>,
+    #[serde(default, rename = "contract_multiplier")]
+    pub lot_size: Option<f64>,
     #[serde(default)]
     pub tick_size: Option<f64>,
     #[serde(default)]
@@ -83,8 +83,8 @@ pub struct InterestRateOptionRule {
     pub description: Option<String>,
     pub option_style: String,
     pub ticker_format: String,
-    #[serde(default)]
-    pub contract_multiplier: Option<f64>,
+    #[serde(default, rename = "contract_multiplier")]
+    pub lot_size: Option<f64>,
     #[serde(default)]
     pub tick_size: Option<f64>,
     #[serde(default)]
