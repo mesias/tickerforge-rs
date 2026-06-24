@@ -237,7 +237,7 @@ impl OptionParser {
         for rule in &spec.options {
             let mut candidates = match rule {
                 OptionRule::Equity(r) => match_equity_options(ticker, r),
-                 OptionRule::Index(r) => match_nonequity_option(
+                OptionRule::Index(r) => match_nonequity_option(
                     ticker,
                     "index",
                     &r.symbol,
