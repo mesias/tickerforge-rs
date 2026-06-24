@@ -130,8 +130,10 @@ pub struct EquitySpec {
     pub currency: Option<String>,
     #[serde(default)]
     pub tick_size: Option<f64>,
-    #[serde(default, rename = "contract_multiplier")]
-    pub lot_size: Option<f64>,
+    #[serde(default, rename = "contract_standard")]
+    pub ctr_std: Option<u32>,
+    #[serde(default, rename = "contract_size")]
+    pub ctr_size: Option<f64>,
     #[serde(default)]
     pub aliases: Vec<String>,
     #[serde(default, deserialize_with = "deserialize_asset_sessions")]
@@ -212,8 +214,10 @@ pub struct ContractSpec {
     pub ticker_format: String,
     pub contract_cycle: String,
     pub expiration_rule: String,
-    #[serde(default, rename = "contract_multiplier")]
-    pub lot_size: Option<f64>,
+    #[serde(default, rename = "contract_standard")]
+    pub ctr_std: Option<u32>,
+    #[serde(default, rename = "contract_size")]
+    pub ctr_size: Option<f64>,
     #[serde(default)]
     pub tick_size: Option<f64>,
     #[serde(default)]
@@ -301,7 +305,8 @@ pub struct ParsedFuturesTicker {
     pub year: i32,
     pub month: u32,
     pub tick_size: Option<f64>,
-    pub lot_size: Option<f64>,
+    pub ctr_std: Option<u32>,
+    pub ctr_size: Option<f64>,
     pub contract: ContractSpec,
     /// The date used for root-symbol resolution.  `None` when a full ticker
     /// was parsed (no date context).
@@ -338,8 +343,8 @@ pub struct ParsedOptionTicker {
     pub exchange: String,
     /// Minimum price increment from the option rule.
     pub tick_size: Option<f64>,
-    /// Contract multiplier from the option rule.
-    pub lot_size: Option<f64>,
+    pub ctr_std: Option<u32>,
+    pub ctr_size: Option<f64>,
 }
 
 #[cfg(test)]
@@ -354,7 +359,8 @@ mod tests {
             ticker_format: default_ticker_format(),
             contract_cycle: "m".into(),
             expiration_rule: "r".into(),
-            lot_size: None,
+            ctr_std: None,
+            ctr_size: None,
             tick_size: None,
             currency: None,
             aliases: vec![],

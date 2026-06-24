@@ -199,7 +199,8 @@ fn parsed_ticker_has_tick_size_and_lot_size() {
     let contract = spec.get_contract("IND").expect("contract");
     let parsed = as_futures(parse_any_ticker_spec("INDM26", &spec).expect("parse"));
     assert_eq!(parsed.tick_size, contract.tick_size);
-    assert_eq!(parsed.lot_size, contract.lot_size);
+    assert_eq!(parsed.ctr_std, contract.ctr_std);
+    assert_eq!(parsed.ctr_size, contract.ctr_size);
 }
 
 // ===========================================================================
@@ -598,50 +599,59 @@ fn parse_new_b3_futures() {
     assert_eq!(parsed_etr.symbol, "ETR");
     assert_eq!(parsed_etr.year, 2026);
     assert_eq!(parsed_etr.month, 1);
-    assert_eq!(parsed_etr.lot_size, Some(1.0));
+    assert_eq!(parsed_etr.ctr_std, Some(1));
+    assert_eq!(parsed_etr.ctr_size, Some(0.1));
 
     // 2. SOL (Solana, last Friday of Jan 2026 -> 2026-01-30)
     let parsed_sol = as_futures(parser.parse("SOLF26").expect("parse"));
     assert_eq!(parsed_sol.symbol, "SOL");
-    assert_eq!(parsed_sol.lot_size, Some(1.0));
+    assert_eq!(parsed_sol.ctr_std, Some(5));
+    assert_eq!(parsed_sol.ctr_size, Some(5.0));
 
     // 3. SJC (Soybean CBOT, 2nd business day prior to March 2026 -> 2026-02-26)
     let parsed_sjc = as_futures(parser.parse("SJCH26").expect("parse"));
     assert_eq!(parsed_sjc.symbol, "SJC");
-    assert_eq!(parsed_sjc.lot_size, Some(1.0));
+    assert_eq!(parsed_sjc.ctr_std, Some(1));
+    assert_eq!(parsed_sjc.ctr_size, Some(450.0));
 
     // 4. SOY (Soybean FOB Santos, business day prior to 16th of Feb 2026 -> 2026-02-13)
     let parsed_soy = as_futures(parser.parse("SOYH26").expect("parse"));
     assert_eq!(parsed_soy.symbol, "SOY");
-    assert_eq!(parsed_soy.lot_size, Some(1.0));
+    assert_eq!(parsed_soy.ctr_std, Some(1));
+    assert_eq!(parsed_soy.ctr_size, Some(34.0));
 
     // 5. GLD (Gold, 3rd to last business day of Jan 2026 -> 2026-01-28)
     let parsed_gld = as_futures(parser.parse("GLDF26").expect("parse"));
     assert_eq!(parsed_gld.symbol, "GLD");
-    assert_eq!(parsed_gld.lot_size, Some(1.0));
+    assert_eq!(parsed_gld.ctr_std, Some(1));
+    assert_eq!(parsed_gld.ctr_size, Some(1.0));
 
     // 6. BIT (Bitcoin, last Friday of Jan 2026 -> 2026-01-30)
     let parsed_bit = as_futures(parser.parse("BITF26").expect("parse"));
     assert_eq!(parsed_bit.symbol, "BIT");
-    assert_eq!(parsed_bit.lot_size, Some(1.0));
-    assert_eq!(parsed_bit.tick_size, Some(2.0));
+    assert_eq!(parsed_bit.ctr_std, Some(1));
+    assert_eq!(parsed_bit.ctr_size, Some(0.01));
+    assert_eq!(parsed_bit.tick_size, Some(20.0));
 
     // 7. ISP (S&P 500, third Friday of March 2026 -> 2026-03-20)
     let parsed_isp = as_futures(parser.parse("ISPH26").expect("parse"));
     assert_eq!(parsed_isp.symbol, "ISP");
-    assert_eq!(parsed_isp.lot_size, Some(50.0));
+    assert_eq!(parsed_isp.ctr_std, Some(1));
+    assert_eq!(parsed_isp.ctr_size, Some(50.0));
     assert_eq!(parsed_isp.tick_size, Some(0.25));
 
     // 8. WSP (Micro S&P 500, third Friday of March 2026 -> 2026-03-20)
     let parsed_wsp = as_futures(parser.parse("WSPH26").expect("parse"));
     assert_eq!(parsed_wsp.symbol, "WSP");
-    assert_eq!(parsed_wsp.lot_size, Some(2.5));
+    assert_eq!(parsed_wsp.ctr_std, Some(1));
+    assert_eq!(parsed_wsp.ctr_size, Some(2.5));
     assert_eq!(parsed_wsp.tick_size, Some(0.25));
 
     // 9. ETH (Hydrous Ethanol, last business day of Jan 2026 -> 2026-01-30)
     let parsed_eth = as_futures(parser.parse("ETHF26").expect("parse"));
     assert_eq!(parsed_eth.symbol, "ETH");
-    assert_eq!(parsed_eth.lot_size, Some(1.0));
+    assert_eq!(parsed_eth.ctr_std, Some(1));
+    assert_eq!(parsed_eth.ctr_size, Some(10.0));
     assert_eq!(parsed_eth.tick_size, Some(0.50));
 
     // Let's also resolve expiration dates to verify they work

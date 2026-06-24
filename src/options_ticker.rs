@@ -46,7 +46,8 @@ fn synthetic_contract(symbol: &str, exchange: &str, cycle: &str, exp_rule: &str)
         ticker_format: "{symbol}{month_code}{yy}".to_string(),
         contract_cycle: cycle.to_string(),
         expiration_rule: exp_rule.to_string(),
-        lot_size: None,
+        ctr_std: None,
+        ctr_size: None,
         tick_size: None,
         currency: None,
         aliases: vec![],
@@ -161,7 +162,8 @@ fn match_equity_options(
             strike: caps["strike"].to_string(),
             exchange: rule.exchange.clone(),
             tick_size: rule.tick_size,
-            lot_size: rule.lot_size,
+            ctr_std: rule.ctr_std,
+            ctr_size: rule.ctr_size,
         });
     }
     results
@@ -175,7 +177,8 @@ fn match_nonequity_option(
     exchange: &str,
     opt_codes: &OptionTypeCodes,
     tick_size: Option<f64>,
-    lot_size: Option<f64>,
+    ctr_std: Option<u32>,
+    ctr_size: Option<f64>,
 ) -> Option<ParsedOptionTicker> {
     let call_esc = regex::escape(&opt_codes.call);
     let put_esc = regex::escape(&opt_codes.put);
@@ -202,7 +205,8 @@ fn match_nonequity_option(
         strike: caps["strike"].to_string(),
         exchange: exchange.to_string(),
         tick_size,
-        lot_size,
+        ctr_std,
+        ctr_size,
     })
 }
 
@@ -232,14 +236,15 @@ impl OptionParser {
         for rule in &spec.options {
             let mut candidates = match rule {
                 OptionRule::Equity(r) => match_equity_options(ticker, r),
-                OptionRule::Index(r) => match_nonequity_option(
+                 OptionRule::Index(r) => match_nonequity_option(
                     ticker,
                     "index",
                     &r.symbol,
                     &r.exchange,
                     &r.option_type_codes,
                     r.tick_size,
-                    r.lot_size,
+                    r.ctr_std,
+                    r.ctr_size,
                 )
                 .into_iter()
                 .collect(),
@@ -250,7 +255,8 @@ impl OptionParser {
                     &r.exchange,
                     &r.option_type_codes,
                     r.tick_size,
-                    r.lot_size,
+                    r.ctr_std,
+                    r.ctr_size,
                 )
                 .into_iter()
                 .collect(),
@@ -261,7 +267,8 @@ impl OptionParser {
                     &r.exchange,
                     &r.option_type_codes,
                     r.tick_size,
-                    r.lot_size,
+                    r.ctr_std,
+                    r.ctr_size,
                 )
                 .into_iter()
                 .collect(),
