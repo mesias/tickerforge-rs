@@ -334,7 +334,7 @@ dependencies = [
 
 [[package]]
 name = "tickerforge"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "bdays",
  "chrono",
