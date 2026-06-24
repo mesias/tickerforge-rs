@@ -114,7 +114,7 @@ fn parse_equity_put_december() {
 fn parse_equity_option_tick_and_lot() {
     let o = unwrap_option(parse_any_ticker("PETRA30").expect("parse"));
     assert_eq!(o.tick_size, Some(0.01));
-    assert_eq!(o.lot_size, Some(100.0));
+    assert_eq!(o.ctr_std, Some(100));
 }
 
 // ===========================================================================
