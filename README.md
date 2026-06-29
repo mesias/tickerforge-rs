@@ -1,5 +1,7 @@
 # tickerforge (Rust)
 
+[![crates.io](https://img.shields.io/crates/v/tickerforge)](https://crates.io/crates/tickerforge)
+[![spec-data crates.io](https://img.shields.io/crates/v/tickerforge-spec-data?label=spec-data%20%28crates.io%29)](https://crates.io/crates/tickerforge-spec-data)
 [![codecov](https://codecov.io/gh/mesias/tickerforge-rs/branch/main/graph/badge.svg)](https://codecov.io/gh/mesias/tickerforge-rs)
 [![CI](https://github.com/mesias/tickerforge-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/mesias/tickerforge-rs/actions/workflows/ci.yml)
 [![Rust](https://img.shields.io/badge/rust-1.74%2B-orange.svg)](https://github.com/mesias/tickerforge-rs/blob/main/Cargo.toml)
@@ -8,11 +10,17 @@
 [![rustfmt](https://img.shields.io/badge/rustfmt-000000?logo=rust&logoColor=white)](https://github.com/rust-lang/rustfmt)
 [![clippy](https://img.shields.io/badge/clippy-000000?logo=rust&logoColor=white)](https://github.com/rust-lang/rust-clippy)
 
-Rust library that loads the default [`tickerforge-spec`](https://github.com/mesias/tickerforge-spec) YAML tree from the [`tickerforge-spec-data`](https://github.com/mesias/tickerforge-spec) crate (git dependency, same content as the Python `tickerforge-spec-data` wheel) and generates or parses **futures, options, and cash equities** tickers from **all supported markets** (parity with [`tickerforge-py`](https://github.com/mesias/tickerforge-py)). Option and equity rules are loaded automatically from all `spec/contracts/**/*.yaml` and `spec/equities/**/*.yaml` files.
+Rust library that loads the default [`tickerforge-spec`](https://github.com/mesias/tickerforge-spec) YAML tree from the [`tickerforge-spec-data`](https://crates.io/crates/tickerforge-spec-data) crate on [crates.io](https://crates.io/crates/tickerforge-spec-data) (same content as the [PyPI `tickerforge-spec-data`](https://pypi.org/project/tickerforge-spec-data/) wheel) and generates or parses **futures, options, and cash equities** tickers from **all supported markets** (parity with [`tickerforge-py`](https://github.com/mesias/tickerforge-py)). Option and equity rules are loaded automatically from all `spec/contracts/**/*.yaml` and `spec/equities/**/*.yaml` files.
 
 Trading sessions use the [`bdays`](https://crates.io/crates/bdays) crate (B3 `BrazilExchange`, US `USSettlement` for CME). Full alignment with Python’s `exchange_calendars` is not guaranteed; see [`docs/calendar-strategy.md`](docs/calendar-strategy.md).
 
 ## Install
+
+From [crates.io](https://crates.io/crates/tickerforge):
+
+```bash
+cargo add tickerforge
+```
 
 From a git checkout:
 
