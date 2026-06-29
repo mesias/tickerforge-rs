@@ -15,7 +15,12 @@ fn coerce_date(as_of: &str) -> Result<NaiveDate, String> {
         .map_err(|e| format!("invalid date {as_of}: {e}"))
 }
 
-fn format_ticker(contract: &ContractSpec, year: i32, month: u32) -> Result<String, String> {
+/// Build a futures ticker string from contract metadata and expiry month.
+pub fn format_contract_ticker(
+    contract: &ContractSpec,
+    year: i32,
+    month: u32,
+) -> Result<String, String> {
     let mc = month_to_code(month)?;
     let yy = format!("{:02}", year.rem_euclid(100));
     let mut out = contract.ticker_format.clone();
@@ -27,6 +32,10 @@ fn format_ticker(contract: &ContractSpec, year: i32, month: u32) -> Result<Strin
     Ok(out)
 }
 
+fn format_ticker(contract: &ContractSpec, year: i32, month: u32) -> Result<String, String> {
+    format_contract_ticker(contract, year, month)
+}
+
 fn still_tradeable(as_of: NaiveDate, expiration: NaiveDate, contract: &ContractSpec) -> bool {
     if contract.symbol == "DOL" || contract.symbol == "WDO" {
         as_of < expiration
@@ -35,17 +44,13 @@ fn still_tradeable(as_of: NaiveDate, expiration: NaiveDate, contract: &ContractS
     }
 }
 
-/// Generate ticker string for a contract (matches Python `generate_ticker_for_contract`).
-pub fn generate_ticker_for_contract(
+/// Collect still-tradeable `(year, month)` pairs scanned forward from
+/// `as_of_date.year() .. as_of_date.year() + 4`, in ascending order.
+fn collect_eligible_forward(
     contract: &ContractSpec,
-    as_of: &str,
+    as_of_date: NaiveDate,
     spec: &SpecRepository,
-    offset: usize,
-) -> Result<String, String> {
-    if as_of.is_empty() {
-        return Err("empty as_of date".to_string());
-    }
-    let as_of_date = coerce_date(as_of)?;
+) -> Result<Vec<(i32, u32)>, String> {
     let cycle = spec
         .contract_cycles
         .get(&contract.contract_cycle)
@@ -75,6 +80,64 @@ pub fn generate_ticker_for_contract(
             }
         }
     }
+    Ok(eligible)
+}
+
+/// Collect already-expired `(year, month)` pairs scanned backward over
+/// `as_of_date.year() - 4 ..= as_of_date.year()`, returned sorted so the
+/// MOST RECENTLY expired contract is first (descending by expiration date).
+fn collect_eligible_backward(
+    contract: &ContractSpec,
+    as_of_date: NaiveDate,
+    spec: &SpecRepository,
+) -> Result<Vec<(i32, u32)>, String> {
+    let cycle = spec
+        .contract_cycles
+        .get(&contract.contract_cycle)
+        .ok_or_else(|| format!("unknown cycle {}", contract.contract_cycle))?;
+    let rule = spec
+        .expiration_rules
+        .get(&contract.expiration_rule)
+        .ok_or_else(|| format!("unknown rule {}", contract.expiration_rule))?;
+    let cal = get_calendar(&contract.exchange);
+
+    // Pairs with their expiration date so we can sort by it.
+    let mut expired: Vec<(NaiveDate, i32, u32)> = Vec::new();
+    for year in (as_of_date.year() - 4)..=as_of_date.year() {
+        let months = resolve_contract_months(cycle, year)?;
+        for month in months {
+            if !is_month_in_calendar_range(&cal, year, month) {
+                continue;
+            }
+            if month_sessions(&cal, year, month).is_empty() {
+                continue;
+            }
+            let expiration_date = match resolve_expiration(contract, year, month, rule, &cal) {
+                Ok(d) => d,
+                Err(_) => continue,
+            };
+            if !still_tradeable(as_of_date, expiration_date, contract) {
+                expired.push((expiration_date, year, month));
+            }
+        }
+    }
+    // Most-recently-expired first: sort by expiration date descending.
+    expired.sort_by_key(|b| std::cmp::Reverse(b.0));
+    Ok(expired.into_iter().map(|(_, y, m)| (y, m)).collect())
+}
+
+/// Generate ticker string for a contract (matches Python `generate_ticker_for_contract`).
+pub fn generate_ticker_for_contract(
+    contract: &ContractSpec,
+    as_of: &str,
+    spec: &SpecRepository,
+    offset: usize,
+) -> Result<String, String> {
+    if as_of.is_empty() {
+        return Err("empty as_of date".to_string());
+    }
+    let as_of_date = coerce_date(as_of)?;
+    let eligible = collect_eligible_forward(contract, as_of_date, spec)?;
 
     if eligible.is_empty() {
         return Err(format!(
@@ -92,12 +155,81 @@ pub fn generate_ticker_for_contract(
     format_ticker(contract, year, month)
 }
 
+/// Signed-offset variant of [`generate_ticker_for_contract`].
+///
+/// - `offset >= 0` → `offset`-th still-tradeable contract from the front
+///   (same as the unsigned `generate_ticker_for_contract`).
+/// - `offset < 0` → `(-offset - 1)`-th most-recently-EXPIRED contract
+///   (`-1` = the contract that most recently rolled off).
+pub fn generate_ticker_for_contract_signed(
+    contract: &ContractSpec,
+    as_of: &str,
+    spec: &SpecRepository,
+    offset: isize,
+) -> Result<String, String> {
+    if as_of.is_empty() {
+        return Err("empty as_of date".to_string());
+    }
+    let as_of_date = coerce_date(as_of)?;
+
+    if offset >= 0 {
+        let eligible = collect_eligible_forward(contract, as_of_date, spec)?;
+        if eligible.is_empty() {
+            return Err(format!(
+                "No eligible contract found for {} at {as_of_date}",
+                contract.symbol
+            ));
+        }
+        let idx = offset as usize;
+        if idx >= eligible.len() {
+            return Err(format!(
+                "Offset {offset} is out of range for {}",
+                contract.symbol
+            ));
+        }
+        let (year, month) = eligible[idx];
+        format_ticker(contract, year, month)
+    } else {
+        let expired = collect_eligible_backward(contract, as_of_date, spec)?;
+        if expired.is_empty() {
+            return Err(format!(
+                "No expired contract found for {} at {as_of_date}",
+                contract.symbol
+            ));
+        }
+        let idx = ((-offset) - 1) as usize;
+        if idx >= expired.len() {
+            return Err(format!(
+                "Offset {offset} is out of range for {}",
+                contract.symbol
+            ));
+        }
+        let (year, month) = expired[idx];
+        format_ticker(contract, year, month)
+    }
+}
+
+/// Front-month ticker for today (offset 0).
+pub fn gen_ticker_ctr(contract: &ContractSpec, spec: &SpecRepository) -> Result<String, String> {
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    generate_ticker_for_contract(contract, &today, spec, 0)
+}
+
+/// Signed-offset ticker for today.  See [`generate_ticker_for_contract_signed`].
+pub fn gen_ticker_ctr_signed(
+    contract: &ContractSpec,
+    spec: &SpecRepository,
+    offset: isize,
+) -> Result<String, String> {
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    generate_ticker_for_contract_signed(contract, &today, spec, offset)
+}
+
 impl ContractSpec {
     /// Front-month ticker for today using the bundled default spec.
     pub fn trading_symbol_today(&self) -> Result<String, String> {
         let spec = load_spec()?;
-        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-        generate_ticker_for_contract(self, &today, &spec, 0)
+        gen_ticker_ctr(self, &spec)
     }
 
     /// Front-month ticker for `as_of` (`YYYY-MM-DD`) using the bundled default spec.
@@ -108,8 +240,7 @@ impl ContractSpec {
 
     /// Front-month ticker for today with an explicit [`SpecRepository`].
     pub fn trading_symbol_today_with_spec(&self, spec: &SpecRepository) -> Result<String, String> {
-        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-        generate_ticker_for_contract(self, &today, spec, 0)
+        gen_ticker_ctr(self, spec)
     }
 
     /// Front-month ticker for `as_of` with an explicit [`SpecRepository`].
@@ -137,6 +268,18 @@ impl TickerForge {
         Ok(Self {
             spec: load_spec_from_path(path)?,
         })
+    }
+
+    /// Front-month ticker for today (offset 0).
+    pub fn gen(&self, symbol: &str) -> Result<String, String> {
+        let contract = self.spec.get_contract(symbol).map_err(|e| e.to_string())?;
+        gen_ticker_ctr(contract, &self.spec)
+    }
+
+    /// Signed-offset ticker for today.  See [`generate_ticker_for_contract_signed`].
+    pub fn gen_signed(&self, symbol: &str, offset: isize) -> Result<String, String> {
+        let contract = self.spec.get_contract(symbol).map_err(|e| e.to_string())?;
+        gen_ticker_ctr_signed(contract, &self.spec, offset)
     }
 
     pub fn generate(&self, symbol: &str, date: &str, offset: usize) -> Result<String, String> {

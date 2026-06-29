@@ -211,6 +211,91 @@ fn match_nonequity_option(
     })
 }
 
+/// Rebuild an option ticker string from a [`ParsedOptionTicker`].
+pub fn format_parsed_option_ticker(
+    parsed: &ParsedOptionTicker,
+    spec: &SpecRepository,
+) -> Result<String, String> {
+    match parsed.kind.as_str() {
+        "equity" => {
+            let rule = spec
+                .options
+                .iter()
+                .find_map(|r| match r {
+                    OptionRule::Equity(eq)
+                        if eq
+                            .underlyings
+                            .iter()
+                            .any(|u| u.eq_ignore_ascii_case(&parsed.underlying_or_symbol)) =>
+                    {
+                        Some(eq)
+                    }
+                    _ => None,
+                })
+                .ok_or_else(|| {
+                    format!(
+                        "no equity option rule for underlying {}",
+                        parsed.underlying_or_symbol
+                    )
+                })?;
+            let codes = if parsed.is_call {
+                &rule.call_month_codes
+            } else {
+                &rule.put_month_codes
+            };
+            let month_code = codes
+                .get((parsed.month - 1) as usize)
+                .ok_or_else(|| format!("invalid option month {}", parsed.month))?;
+            let root = equity_root(&parsed.underlying_or_symbol);
+            Ok(format!("{root}{month_code}{}", parsed.strike))
+        }
+        "index" | "dollar" | "interest_rate" => {
+            let opt_codes =
+                nonequity_option_type_codes(spec, &parsed.kind, &parsed.underlying_or_symbol)?;
+            let year = parsed
+                .year
+                .ok_or_else(|| "non-equity option ticker requires year".to_string())?;
+            let type_code = if parsed.is_call {
+                &opt_codes.call
+            } else {
+                &opt_codes.put
+            };
+            let month_code = month_to_code(parsed.month)?;
+            Ok(format!(
+                "{}{}{:02}{type_code}{}",
+                parsed.underlying_or_symbol,
+                month_code,
+                year.rem_euclid(100),
+                parsed.strike
+            ))
+        }
+        other => Err(format!("unsupported option kind: {other}")),
+    }
+}
+
+fn nonequity_option_type_codes(
+    spec: &SpecRepository,
+    kind: &str,
+    symbol: &str,
+) -> Result<OptionTypeCodes, String> {
+    for rule in &spec.options {
+        let (rule_kind, rule_symbol, codes) = match rule {
+            OptionRule::Index(r) => ("index", r.symbol.as_str(), r.option_type_codes.clone()),
+            OptionRule::Dollar(r) => ("dollar", r.symbol.as_str(), r.option_type_codes.clone()),
+            OptionRule::InterestRate(r) => (
+                "interest_rate",
+                r.symbol.as_str(),
+                r.option_type_codes.clone(),
+            ),
+            OptionRule::Equity(_) => continue,
+        };
+        if rule_kind == kind && rule_symbol.eq_ignore_ascii_case(symbol) {
+            return Ok(codes);
+        }
+    }
+    Err(format!("no {kind} option rule for symbol {symbol}"))
+}
+
 // ---------------------------------------------------------------------------
 // OptionParser
 // ---------------------------------------------------------------------------

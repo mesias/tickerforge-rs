@@ -17,3 +17,17 @@ fn generate_ind_rolls_after_expiry() {
     let ticker = forge.generate("IND", "2026-06-18", 0).expect("gen");
     assert_eq!(ticker, "INDQ26");
 }
+
+#[test]
+fn gen_defaults_to_today() {
+    let forge = TickerForge::with_spec_path(&spec_path()).expect("forge");
+    let today = chrono::Local::now()
+        .date_naive()
+        .format("%Y-%m-%d")
+        .to_string();
+
+    assert_eq!(
+        forge.gen("DOL").expect("today"),
+        forge.generate("DOL", &today, 0).expect("explicit today")
+    );
+}

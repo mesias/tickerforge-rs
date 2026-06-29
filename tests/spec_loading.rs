@@ -1,6 +1,5 @@
 mod common;
 
-use chrono::Local;
 use tickerforge::{load_spec_from_path, TickerForge};
 
 use crate::common::spec_path;
@@ -45,16 +44,13 @@ fn contract_trading_symbol_matches_forge() {
             .expect("gen default")
     );
 
-    let today = Local::now().format("%Y-%m-%d").to_string();
     assert_eq!(
         dol.trading_symbol_today_with_spec(&spec)
             .expect("today with_spec"),
-        forge.generate("DOL", &today, 0).expect("gen today")
+        forge.gen("DOL").expect("gen today")
     );
     assert_eq!(
         dol.trading_symbol_today().expect("today default"),
-        forge_default
-            .generate("DOL", &today, 0)
-            .expect("gen today default")
+        forge_default.gen("DOL").expect("gen today default")
     );
 }

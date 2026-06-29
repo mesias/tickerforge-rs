@@ -45,6 +45,7 @@ fn generate_and_parse_round_trip() {
     let generated = forge.generate("IND", "2026-06-01", 0).expect("gen");
     let parsed = as_futures(parser.parse_date(&generated, "2026-06-01").expect("parse"));
     assert_eq!(generated, "INDM26");
+    assert_eq!(parsed.ticker().expect("ticker"), "INDM26");
     assert_eq!(parsed.symbol, "IND");
     assert_eq!(parsed.year, 2026);
     assert_eq!(parsed.month, 6);
@@ -517,6 +518,25 @@ fn builder_full_ticker_no_session_info() {
     );
     assert!(parsed.reference_date.is_none());
     assert!(parsed.is_trading_session.is_none());
+    assert_eq!(parsed.ticker().expect("ticker"), "DOLK26");
+}
+
+#[test]
+fn parsed_ticker_from_root_symbol_formats_ticker() {
+    let parsed = as_futures(parse_any_ticker_date("DOL", "2026-06-29").expect("parse"));
+    assert_eq!(parsed.ticker().expect("ticker"), "DOLN26");
+}
+
+#[test]
+fn parsed_ticker_formats_equity_option() {
+    let parsed = parse_any_ticker("PETRA30").expect("parse");
+    assert_eq!(parsed.ticker().expect("ticker"), "PETRA30");
+}
+
+#[test]
+fn parsed_ticker_formats_dollar_option() {
+    let parsed = parse_any_ticker("DOLK26C5000").expect("parse");
+    assert_eq!(parsed.ticker().expect("ticker"), "DOLK26C5000");
 }
 
 #[test]

@@ -220,6 +220,15 @@ fn cme_futures_parse_via_any() {
     }
 }
 
+#[test]
+fn option_parsed_ticker_formats_round_trip() {
+    let parsed = parse_any_ticker("PETRA30").expect("parse");
+    assert_eq!(parsed.ticker().expect("ticker"), "PETRA30");
+
+    let parsed = parse_any_ticker("DOLK26C5000").expect("parse");
+    assert_eq!(parsed.ticker().expect("ticker"), "DOLK26C5000");
+}
+
 // ===========================================================================
 // DOL disambiguation: future vs option
 // ===========================================================================
