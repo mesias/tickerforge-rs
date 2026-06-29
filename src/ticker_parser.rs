@@ -35,7 +35,7 @@ use crate::models::{ParsedEquityTicker, ParsedFuturesTicker, ParsedOptionTicker,
 use crate::month_codes::code_to_month;
 use crate::options_ticker::OptionParser;
 use crate::spec_loader::{load_spec, load_spec_from_path};
-use crate::ticker_generator::generate_ticker_for_contract;
+use crate::ticker_generator::{generate_ticker_for_contract, generate_ticker_for_contract_signed};
 
 fn coerce_reference_date(reference_date: Option<&str>) -> NaiveDate {
     if let Some(s) = reference_date {
@@ -88,6 +88,7 @@ fn try_parse_full_ticker(
             contract: contract.clone(),
             reference_date: None,
             is_trading_session: None,
+            contract_offset: None,
         }));
     }
 
@@ -125,6 +126,54 @@ fn load_spec_for_builder(spec_path: Option<&Path>) -> Result<SpecRepository, Str
     }
 }
 
+/// If `ticker` matches the `SYMBOL[n]` bracket-tag syntax, return the
+/// uppercased root and the signed offset.  Returns `None` for full tickers
+/// (`DOLN26`), plain roots (`DOL`), and anything else without a `[n]` tag.
+fn parse_tagged_root(ticker: &str) -> Option<(String, isize)> {
+    static TAG_RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    let re = TAG_RE.get_or_init(|| {
+        Regex::new(r"^([A-Za-z][A-Za-z0-9]*)\[(-?\d+)]$").expect("valid tag regex")
+    });
+    let caps = re.captures(ticker)?;
+    let root = caps[1].to_uppercase();
+    let offset: isize = caps[2].parse().ok()?;
+    Some((root, offset))
+}
+
+/// Resolve a `SYMBOL[n]` tagged root to a parsed futures ticker.
+fn try_resolve_tagged_root(
+    ticker: &str,
+    spec: &SpecRepository,
+    reference_date: Option<&str>,
+    exchange: Option<&str>,
+) -> Result<Option<ParsedFuturesTicker>, String> {
+    let Some((root, offset)) = parse_tagged_root(ticker) else {
+        return Ok(None);
+    };
+    let contract = match spec.contracts.get(&root) {
+        Some(c) => c,
+        None => return Ok(None),
+    };
+    if let Some(ex) = exchange {
+        if !contract.exchange.eq_ignore_ascii_case(ex) {
+            return Ok(None);
+        }
+    }
+
+    let ref_date = coerce_reference_date(reference_date);
+    let date_str = ref_date.format("%Y-%m-%d").to_string();
+    let full_ticker = generate_ticker_for_contract_signed(contract, &date_str, spec, offset)?;
+    let mut result = try_parse_full_ticker(&full_ticker, spec)?;
+    if let Some(ref mut parsed) = result {
+        let cal = get_calendar(&contract.exchange);
+        let sessions = cal.sessions_in_range(ref_date, ref_date);
+        parsed.reference_date = Some(ref_date);
+        parsed.is_trading_session = Some(!sessions.is_empty());
+        parsed.contract_offset = Some(offset);
+    }
+    Ok(result)
+}
+
 // ---------------------------------------------------------------------------
 // Unified parsing: futures + options
 // ---------------------------------------------------------------------------
@@ -138,6 +187,25 @@ pub enum AnyParsedTicker {
     Option(ParsedOptionTicker),
     /// An equity ticker.
     Equity(ParsedEquityTicker),
+}
+
+impl AnyParsedTicker {
+    /// Full trading symbol string (e.g. `DOLN26`, `PETRA30`, `DOLK26C5000`).
+    pub fn ticker(&self) -> Result<String, String> {
+        self.format_ticker()
+    }
+
+    /// Rebuild the exchange ticker string from this parsed result.
+    pub fn format_ticker(&self) -> Result<String, String> {
+        match self {
+            AnyParsedTicker::Futures(f) => f.format_ticker(),
+            AnyParsedTicker::Option(o) => {
+                let spec = load_spec()?;
+                o.format_ticker(&spec)
+            }
+            AnyParsedTicker::Equity(e) => Ok(e.format_ticker()),
+        }
+    }
 }
 
 fn parse_any_inner(
@@ -199,6 +267,7 @@ fn parse_any_inner(
             contract: contract.clone(),
             reference_date: None,
             is_trading_session: None,
+            contract_offset: None,
         });
     }
 
@@ -232,6 +301,11 @@ fn parse_any_inner(
     }
     if let Some(o) = option_candidates.into_iter().next() {
         return Ok(AnyParsedTicker::Option(o));
+    }
+
+    // Try bracket-tag root resolution (e.g. `DOL[1]`, `IND[-1]`).
+    if let Some(result) = try_resolve_tagged_root(ticker, spec, reference_date, exchange)? {
+        return Ok(AnyParsedTicker::Futures(result));
     }
 
     // Try root symbol resolution (futures only).

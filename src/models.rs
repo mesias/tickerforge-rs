@@ -314,6 +314,22 @@ pub struct ParsedFuturesTicker {
     /// Whether [`reference_date`] is an actual exchange trading session.
     /// `None` when a full ticker was parsed.
     pub is_trading_session: Option<bool>,
+    /// The `SYMBOL[n]` bracket-tag offset used during parsing, if any.
+    /// `None` for plain roots (`DOL`) and full tickers (`DOLN26`); `Some(n)`
+    /// for tagged input like `DOL[1]` or `IND[-1]`.
+    pub contract_offset: Option<isize>,
+}
+
+impl ParsedFuturesTicker {
+    /// Full trading symbol string (e.g. `DOLN26`, `INDM26`).
+    pub fn format_ticker(&self) -> Result<String, String> {
+        crate::ticker_generator::format_contract_ticker(&self.contract, self.year, self.month)
+    }
+
+    /// Alias for [`Self::format_ticker`].
+    pub fn ticker(&self) -> Result<String, String> {
+        self.format_ticker()
+    }
 }
 
 /// Parsed equity ticker.
@@ -321,6 +337,18 @@ pub struct ParsedFuturesTicker {
 pub struct ParsedEquityTicker {
     pub symbol: String,
     pub equity: EquitySpec,
+}
+
+impl ParsedEquityTicker {
+    /// Full trading symbol string (same as [`Self::symbol`] for cash equities).
+    pub fn format_ticker(&self) -> String {
+        self.symbol.clone()
+    }
+
+    /// Alias for [`Self::format_ticker`].
+    pub fn ticker(&self) -> String {
+        self.format_ticker()
+    }
 }
 
 /// Parsed option ticker.
@@ -345,6 +373,18 @@ pub struct ParsedOptionTicker {
     pub tick_size: Option<f64>,
     pub ctr_std: Option<u32>,
     pub ctr_size: Option<f64>,
+}
+
+impl ParsedOptionTicker {
+    /// Rebuild the exchange option ticker string from this parsed result.
+    pub fn format_ticker(&self, spec: &SpecRepository) -> Result<String, String> {
+        crate::options_ticker::format_parsed_option_ticker(self, spec)
+    }
+
+    /// Alias for [`Self::format_ticker`].
+    pub fn ticker(&self, spec: &SpecRepository) -> Result<String, String> {
+        self.format_ticker(spec)
+    }
 }
 
 #[cfg(test)]
