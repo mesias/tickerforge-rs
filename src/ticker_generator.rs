@@ -36,7 +36,7 @@ fn format_ticker(contract: &ContractSpec, year: i32, month: u32) -> Result<Strin
     format_contract_ticker(contract, year, month)
 }
 
-fn still_tradeable(as_of: NaiveDate, expiration: NaiveDate, contract: &ContractSpec) -> bool {
+pub(crate) fn still_tradeable(as_of: NaiveDate, expiration: NaiveDate, contract: &ContractSpec) -> bool {
     if contract.symbol == "DOL" || contract.symbol == "WDO" {
         as_of < expiration
     } else {
@@ -46,7 +46,7 @@ fn still_tradeable(as_of: NaiveDate, expiration: NaiveDate, contract: &ContractS
 
 /// Collect still-tradeable `(year, month)` pairs scanned forward from
 /// `as_of_date.year() .. as_of_date.year() + 4`, in ascending order.
-fn collect_eligible_forward(
+pub(crate) fn collect_eligible_forward(
     contract: &ContractSpec,
     as_of_date: NaiveDate,
     spec: &SpecRepository,

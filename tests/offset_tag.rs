@@ -258,3 +258,80 @@ fn tagged_root_stamps_reference_date_and_session() {
     assert_eq!(parsed.is_trading_session, Some(true));
     assert_eq!(parsed.contract_offset, Some(1));
 }
+
+// ---------------------------------------------------------------------------
+// Conditional roll-day tag validation
+// ---------------------------------------------------------------------------
+
+#[test]
+fn parse_dol_roll_tag_valid_on_roll_day() {
+    // For DOLN26 (July 2026), the expiration is July 1st, 2026.
+    // DOL rolls off on expiration day, so the last trading day is June 30th, 2026.
+    let ref_roll = "2026-06-30";
+
+    let any = parse_any_ticker_date("DOL[@roll]", ref_roll).expect("parse shortcut");
+    let parsed = as_futures(any);
+    assert_eq!(parsed.ticker().expect("ticker"), "DOLQ26");
+    assert_eq!(parsed.contract_offset, Some(1));
+
+    let any_zero = parse_any_ticker_date("DOL[0@roll]", ref_roll).expect("parse explicit zero");
+    let parsed_zero = as_futures(any_zero);
+    assert_eq!(parsed_zero.ticker().expect("ticker"), "DOLN26");
+    assert_eq!(parsed_zero.contract_offset, Some(0));
+}
+
+#[test]
+fn parse_dol_roll_tag_invalid_on_non_roll_day() {
+    let ref_other = "2026-06-29";
+    let err = parse_any_ticker_date("DOL[@roll]", ref_other).unwrap_err();
+    assert!(err.contains("is not valid on 2026-06-29"));
+}
+
+#[test]
+fn parse_win_roll_tag_index_future() {
+    // For WINM26 (June 2026), the expiration is June 17th, 2026.
+    // WIN remains tradeable on expiration day, so the last trading day is June 17th.
+    let ref_roll = "2026-06-17";
+    let ref_other = "2026-06-16";
+
+    let any = parse_any_ticker_date("WIN[@roll]", ref_roll).expect("parse shortcut");
+    let parsed = as_futures(any);
+    assert_eq!(parsed.ticker().expect("ticker"), "WINQ26");
+    assert_eq!(parsed.contract_offset, Some(1));
+
+    let any_zero = parse_any_ticker_date("WIN[0@roll]", ref_roll).expect("parse explicit zero");
+    let parsed_zero = as_futures(any_zero);
+    assert_eq!(parsed_zero.ticker().expect("ticker"), "WINM26");
+    assert_eq!(parsed_zero.contract_offset, Some(0));
+
+    let err = parse_any_ticker_date("WIN[@roll]", ref_other).unwrap_err();
+    assert!(err.contains("is not valid on 2026-06-16"));
+}
+
+// ---------------------------------------------------------------------------
+// is_valid Flag Verification
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_is_valid_flag_for_roll_day() {
+    let any = parse_any_ticker_date("DOL[@roll]", "2026-06-30").expect("parse");
+    let parsed = as_futures(any);
+    assert_eq!(parsed.is_valid, Some(true));
+}
+
+#[test]
+fn test_is_valid_flag_for_expired_contracts() {
+    // DOLQ24 (August 2024 contract) has expired as of July 1st, 2026
+    let any = parse_any_ticker_date("DOLQ24", "2026-07-01").expect("parse");
+    let parsed = as_futures(any);
+    assert_eq!(parsed.is_valid, Some(false));
+}
+
+#[test]
+fn test_is_valid_flag_for_active_contracts() {
+    // DOLQ26 (August 2026 contract) is active as of July 1st, 2026
+    let any = parse_any_ticker_date("DOLQ26", "2026-07-01").expect("parse");
+    let parsed = as_futures(any);
+    assert_eq!(parsed.is_valid, Some(true));
+}
+

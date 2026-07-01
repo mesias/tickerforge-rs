@@ -89,6 +89,7 @@ fn try_parse_full_ticker(
             reference_date: None,
             is_trading_session: None,
             contract_offset: None,
+            is_valid: None,
         }));
     }
 
@@ -115,6 +116,22 @@ fn try_resolve_root_symbol(
         let sessions = cal.sessions_in_range(ref_date, ref_date);
         parsed.reference_date = Some(ref_date);
         parsed.is_trading_session = Some(!sessions.is_empty());
+        let rule = spec
+            .expiration_rules
+            .get(&contract.expiration_rule)
+            .ok_or_else(|| format!("unknown rule {}", contract.expiration_rule))?;
+        let expiration = crate::expiration_rules::resolve_expiration(
+            contract,
+            parsed.year,
+            parsed.month,
+            rule,
+            &cal,
+        )?;
+        parsed.is_valid = Some(crate::ticker_generator::still_tradeable(
+            ref_date,
+            expiration,
+            contract,
+        ));
     }
     Ok(result)
 }
@@ -126,18 +143,64 @@ fn load_spec_for_builder(spec_path: Option<&Path>) -> Result<SpecRepository, Str
     }
 }
 
-/// If `ticker` matches the `SYMBOL[n]` bracket-tag syntax, return the
-/// uppercased root and the signed offset.  Returns `None` for full tickers
-/// (`DOLN26`), plain roots (`DOL`), and anything else without a `[n]` tag.
-fn parse_tagged_root(ticker: &str) -> Option<(String, isize)> {
+/// If `ticker` matches the `SYMBOL[n]` or `SYMBOL[n@roll]` bracket-tag syntax, return the
+/// uppercased root, the signed offset, and the optional roll condition.
+fn parse_tagged_root(ticker: &str) -> Option<(String, isize, Option<String>)> {
     static TAG_RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
     let re = TAG_RE.get_or_init(|| {
-        Regex::new(r"^([A-Za-z][A-Za-z0-9]*)\[(-?\d+)]$").expect("valid tag regex")
+        Regex::new(r"(?i)^([A-Za-z][A-Za-z0-9]*)\[(?:(-?\d+)?@(roll)|(-?\d+))]$").expect("valid tag regex")
     });
     let caps = re.captures(ticker)?;
     let root = caps[1].to_uppercase();
-    let offset: isize = caps[2].parse().ok()?;
-    Some((root, offset))
+    if caps.get(3).is_some() {
+        let offset = caps.get(2)
+            .map(|m| m.as_str().parse::<isize>().unwrap_or(1))
+            .unwrap_or(1);
+        let cond = caps[3].to_lowercase();
+        Some((root, offset, Some(cond)))
+    } else {
+        let offset: isize = caps[4].parse().ok()?;
+        Some((root, offset, None))
+    }
+}
+
+fn is_roll_day(contract: &crate::models::ContractSpec, ref_date: NaiveDate, spec: &SpecRepository) -> Result<bool, String> {
+    let eligible = crate::ticker_generator::collect_eligible_forward(contract, ref_date, spec)?;
+    if eligible.is_empty() {
+        return Ok(false);
+    }
+    let (front_year, front_month) = eligible[0];
+    let rule = spec
+        .expiration_rules
+        .get(&contract.expiration_rule)
+        .ok_or_else(|| format!("unknown rule {}", contract.expiration_rule))?;
+    let calendar = get_calendar(&contract.exchange);
+    let front_expiration = crate::expiration_rules::resolve_expiration(
+        contract,
+        front_year,
+        front_month,
+        rule,
+        &calendar,
+    )?;
+
+    let roll_date = if contract.symbol == "DOL" || contract.symbol == "WDO" {
+        front_expiration
+    } else {
+        let sessions = calendar.sessions_in_range(front_expiration, front_expiration + chrono::Duration::days(10));
+        let future_sessions: Vec<NaiveDate> = sessions.into_iter().filter(|d| *d > front_expiration).collect();
+        if future_sessions.is_empty() {
+            return Ok(false);
+        }
+        future_sessions[0]
+    };
+
+    let sessions = calendar.sessions_in_range(roll_date - chrono::Duration::days(30), roll_date);
+    let past_sessions: Vec<NaiveDate> = sessions.into_iter().filter(|d| *d < roll_date).collect();
+    if past_sessions.is_empty() {
+        return Ok(false);
+    }
+    let last_trading_day = past_sessions[past_sessions.len() - 1];
+    Ok(ref_date == last_trading_day)
 }
 
 /// Resolve a `SYMBOL[n]` tagged root to a parsed futures ticker.
@@ -147,7 +210,7 @@ fn try_resolve_tagged_root(
     reference_date: Option<&str>,
     exchange: Option<&str>,
 ) -> Result<Option<ParsedFuturesTicker>, String> {
-    let Some((root, offset)) = parse_tagged_root(ticker) else {
+    let Some((root, offset, condition)) = parse_tagged_root(ticker) else {
         return Ok(None);
     };
     let contract = match spec.contracts.get(&root) {
@@ -161,6 +224,18 @@ fn try_resolve_tagged_root(
     }
 
     let ref_date = coerce_reference_date(reference_date);
+
+    if let Some(cond) = condition {
+        if cond == "roll" {
+            if !is_roll_day(contract, ref_date, spec)? {
+                return Err(format!(
+                    "Ticker '{}[{}@roll]' is not valid on {} because it is not the last trading day of the expiring contract.",
+                    contract.symbol, offset, ref_date.format("%Y-%m-%d")
+                ));
+            }
+        }
+    }
+
     let date_str = ref_date.format("%Y-%m-%d").to_string();
     let full_ticker = generate_ticker_for_contract_signed(contract, &date_str, spec, offset)?;
     let mut result = try_parse_full_ticker(&full_ticker, spec)?;
@@ -170,6 +245,22 @@ fn try_resolve_tagged_root(
         parsed.reference_date = Some(ref_date);
         parsed.is_trading_session = Some(!sessions.is_empty());
         parsed.contract_offset = Some(offset);
+        let rule = spec
+            .expiration_rules
+            .get(&contract.expiration_rule)
+            .ok_or_else(|| format!("unknown rule {}", contract.expiration_rule))?;
+        let expiration = crate::expiration_rules::resolve_expiration(
+            contract,
+            parsed.year,
+            parsed.month,
+            rule,
+            &cal,
+        )?;
+        parsed.is_valid = Some(crate::ticker_generator::still_tradeable(
+            ref_date,
+            expiration,
+            contract,
+        ));
     }
     Ok(result)
 }
@@ -268,6 +359,7 @@ fn parse_any_inner(
             reference_date: None,
             is_trading_session: None,
             contract_offset: None,
+            is_valid: None,
         });
     }
 
@@ -296,7 +388,30 @@ fn parse_any_inner(
         ));
     }
 
-    if let Some(f) = futures_candidates.into_iter().next() {
+    if let Some(mut f) = futures_candidates.into_iter().next() {
+        if let Some(ref_date_str) = reference_date {
+            let ref_date = coerce_reference_date(Some(ref_date_str));
+            let cal = get_calendar(&f.contract.exchange);
+            let sessions = cal.sessions_in_range(ref_date, ref_date);
+            f.reference_date = Some(ref_date);
+            f.is_trading_session = Some(!sessions.is_empty());
+            let rule = spec
+                .expiration_rules
+                .get(&f.contract.expiration_rule)
+                .ok_or_else(|| format!("unknown rule {}", f.contract.expiration_rule))?;
+            let expiration = crate::expiration_rules::resolve_expiration(
+                &f.contract,
+                f.year,
+                f.month,
+                rule,
+                &cal,
+            )?;
+            f.is_valid = Some(crate::ticker_generator::still_tradeable(
+                ref_date,
+                expiration,
+                &f.contract,
+            ));
+        }
         return Ok(AnyParsedTicker::Futures(f));
     }
     if let Some(o) = option_candidates.into_iter().next() {
