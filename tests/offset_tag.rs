@@ -334,4 +334,3 @@ fn test_is_valid_flag_for_active_contracts() {
     let parsed = as_futures(any);
     assert_eq!(parsed.is_valid, Some(true));
 }
-
