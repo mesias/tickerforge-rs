@@ -314,10 +314,9 @@ pub struct ParsedFuturesTicker {
     /// Whether [`reference_date`] is an actual exchange trading session.
     /// `None` when a full ticker was parsed.
     pub is_trading_session: Option<bool>,
-    /// The `SYMBOL[n]` bracket-tag offset used during parsing, if any.
-    /// `None` for plain roots (`DOL`) and full tickers (`DOLN26`); `Some(n)`
-    /// for tagged input like `DOL[1]` or `IND[-1]`.
     pub contract_offset: Option<isize>,
+    /// Whether the contract is tradeable/valid on the reference date.
+    pub is_valid: Option<bool>,
 }
 
 impl ParsedFuturesTicker {

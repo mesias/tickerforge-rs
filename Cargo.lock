@@ -348,7 +348,7 @@ dependencies = [
 
 [[package]]
 name = "tickerforge-spec-data"
-version = "0.1.12"
+version = "0.1.13"
 
 [[package]]
 name = "unicode-ident"
