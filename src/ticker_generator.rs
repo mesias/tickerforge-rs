@@ -36,7 +36,11 @@ fn format_ticker(contract: &ContractSpec, year: i32, month: u32) -> Result<Strin
     format_contract_ticker(contract, year, month)
 }
 
-pub(crate) fn still_tradeable(as_of: NaiveDate, expiration: NaiveDate, contract: &ContractSpec) -> bool {
+pub(crate) fn still_tradeable(
+    as_of: NaiveDate,
+    expiration: NaiveDate,
+    contract: &ContractSpec,
+) -> bool {
     if contract.symbol == "DOL" || contract.symbol == "WDO" {
         as_of < expiration
     } else {

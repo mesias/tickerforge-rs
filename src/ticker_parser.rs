@@ -128,9 +128,7 @@ fn try_resolve_root_symbol(
             &cal,
         )?;
         parsed.is_valid = Some(crate::ticker_generator::still_tradeable(
-            ref_date,
-            expiration,
-            contract,
+            ref_date, expiration, contract,
         ));
     }
     Ok(result)
@@ -148,12 +146,14 @@ fn load_spec_for_builder(spec_path: Option<&Path>) -> Result<SpecRepository, Str
 fn parse_tagged_root(ticker: &str) -> Option<(String, isize, Option<String>)> {
     static TAG_RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
     let re = TAG_RE.get_or_init(|| {
-        Regex::new(r"(?i)^([A-Za-z][A-Za-z0-9]*)\[(?:(-?\d+)?@(roll)|(-?\d+))]$").expect("valid tag regex")
+        Regex::new(r"(?i)^([A-Za-z][A-Za-z0-9]*)\[(?:(-?\d+)?@(roll)|(-?\d+))]$")
+            .expect("valid tag regex")
     });
     let caps = re.captures(ticker)?;
     let root = caps[1].to_uppercase();
     if caps.get(3).is_some() {
-        let offset = caps.get(2)
+        let offset = caps
+            .get(2)
             .map(|m| m.as_str().parse::<isize>().unwrap_or(1))
             .unwrap_or(1);
         let cond = caps[3].to_lowercase();
@@ -164,7 +164,11 @@ fn parse_tagged_root(ticker: &str) -> Option<(String, isize, Option<String>)> {
     }
 }
 
-fn is_roll_day(contract: &crate::models::ContractSpec, ref_date: NaiveDate, spec: &SpecRepository) -> Result<bool, String> {
+fn is_roll_day(
+    contract: &crate::models::ContractSpec,
+    ref_date: NaiveDate,
+    spec: &SpecRepository,
+) -> Result<bool, String> {
     let eligible = crate::ticker_generator::collect_eligible_forward(contract, ref_date, spec)?;
     if eligible.is_empty() {
         return Ok(false);
@@ -186,8 +190,14 @@ fn is_roll_day(contract: &crate::models::ContractSpec, ref_date: NaiveDate, spec
     let roll_date = if contract.symbol == "DOL" || contract.symbol == "WDO" {
         front_expiration
     } else {
-        let sessions = calendar.sessions_in_range(front_expiration, front_expiration + chrono::Duration::days(10));
-        let future_sessions: Vec<NaiveDate> = sessions.into_iter().filter(|d| *d > front_expiration).collect();
+        let sessions = calendar.sessions_in_range(
+            front_expiration,
+            front_expiration + chrono::Duration::days(10),
+        );
+        let future_sessions: Vec<NaiveDate> = sessions
+            .into_iter()
+            .filter(|d| *d > front_expiration)
+            .collect();
         if future_sessions.is_empty() {
             return Ok(false);
         }
@@ -226,13 +236,11 @@ fn try_resolve_tagged_root(
     let ref_date = coerce_reference_date(reference_date);
 
     if let Some(cond) = condition {
-        if cond == "roll" {
-            if !is_roll_day(contract, ref_date, spec)? {
-                return Err(format!(
+        if cond == "roll" && !is_roll_day(contract, ref_date, spec)? {
+            return Err(format!(
                     "Ticker '{}[{}@roll]' is not valid on {} because it is not the last trading day of the expiring contract.",
                     contract.symbol, offset, ref_date.format("%Y-%m-%d")
                 ));
-            }
         }
     }
 
@@ -257,9 +265,7 @@ fn try_resolve_tagged_root(
             &cal,
         )?;
         parsed.is_valid = Some(crate::ticker_generator::still_tradeable(
-            ref_date,
-            expiration,
-            contract,
+            ref_date, expiration, contract,
         ));
     }
     Ok(result)
