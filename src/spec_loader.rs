@@ -1,8 +1,9 @@
 //! Load YAML spec from disk (futures contracts + options from all markets).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::calendars::register_schedules;
 use crate::models::{
@@ -10,6 +11,66 @@ use crate::models::{
 };
 use crate::options_spec::load_all_option_rules;
 use crate::schedule::load_schedules;
+
+const LOAD_SPEC_CACHE_MAX: usize = 8;
+
+struct LoadSpecCache {
+    map: HashMap<PathBuf, Arc<SpecRepository>>,
+    order: VecDeque<PathBuf>,
+}
+
+impl LoadSpecCache {
+    fn new() -> Self {
+        Self {
+            map: HashMap::new(),
+            order: VecDeque::new(),
+        }
+    }
+
+    fn get(&mut self, key: &Path) -> Option<Arc<SpecRepository>> {
+        let arc = self.map.get(key)?.clone();
+        if let Some(pos) = self.order.iter().position(|p| p == key) {
+            let path = self.order.remove(pos).expect("index valid");
+            self.order.push_back(path);
+        }
+        Some(arc)
+    }
+
+    fn insert(&mut self, key: PathBuf, value: Arc<SpecRepository>) {
+        if self.map.contains_key(&key) {
+            if let Some(pos) = self.order.iter().position(|p| p == &key) {
+                self.order.remove(pos);
+            }
+        } else {
+            while self.map.len() >= LOAD_SPEC_CACHE_MAX {
+                if let Some(oldest) = self.order.pop_front() {
+                    self.map.remove(&oldest);
+                } else {
+                    break;
+                }
+            }
+        }
+        self.order.push_back(key.clone());
+        self.map.insert(key, value);
+    }
+
+    fn clear(&mut self) {
+        self.map.clear();
+        self.order.clear();
+    }
+}
+
+fn load_spec_cache() -> &'static Mutex<LoadSpecCache> {
+    static CACHE: OnceLock<Mutex<LoadSpecCache>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(LoadSpecCache::new()))
+}
+
+/// Drop all cached [`load_spec`] / [`load_spec_from_path`] results.
+pub fn clear_load_spec_cache() {
+    if let Ok(mut cache) = load_spec_cache().lock() {
+        cache.clear();
+    }
+}
 
 fn read_yaml_mapping(path: &Path) -> Result<serde_yaml::Mapping, String> {
     let raw = fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
@@ -206,16 +267,24 @@ fn default_spec_path() -> PathBuf {
 
 /// Load the default futures spec tree from the `tickerforge-spec-data` crate
 /// (canonical YAML under <https://github.com/mesias/tickerforge-spec>).
+///
+/// Results are cached by resolved absolute path (up to 8 entries). Call
+/// [`clear_load_spec_cache`] if the YAML on disk changed and must be reloaded.
 pub fn load_spec() -> Result<SpecRepository, String> {
     load_spec_at(default_spec_path())
 }
 
 /// Load futures spec from a directory (must contain `exchanges/`, `contracts/`, `schemas/`, etc.).
+///
+/// Results are cached by resolved absolute path (up to 8 entries).
 pub fn load_spec_from_path(path: &Path) -> Result<SpecRepository, String> {
     load_spec_at(path.to_path_buf())
 }
 
 fn load_spec_at(spec_root: PathBuf) -> Result<SpecRepository, String> {
+    if !spec_root.exists() {
+        return Err(format!("Spec path does not exist: {}", spec_root.display()));
+    }
     let spec_root = spec_root
         .canonicalize()
         .map_err(|e| format!("spec path: {e}"))?;
@@ -224,11 +293,33 @@ fn load_spec_at(spec_root: PathBuf) -> Result<SpecRepository, String> {
         return Err(format!("Spec path does not exist: {}", spec_root.display()));
     }
 
-    let exchanges = load_exchanges(&spec_root)?;
-    let (contract_cycles, expiration_rules) = load_cycles_and_rules(&spec_root)?;
+    {
+        let mut cache = load_spec_cache()
+            .lock()
+            .map_err(|_| "load_spec cache poisoned".to_string())?;
+        if let Some(cached) = cache.get(&spec_root) {
+            return Ok((*cached).clone());
+        }
+    }
+
+    let loaded = Arc::new(load_spec_uncached(&spec_root)?);
+
+    {
+        let mut cache = load_spec_cache()
+            .lock()
+            .map_err(|_| "load_spec cache poisoned".to_string())?;
+        cache.insert(spec_root, Arc::clone(&loaded));
+    }
+
+    Ok((*loaded).clone())
+}
+
+fn load_spec_uncached(spec_root: &Path) -> Result<SpecRepository, String> {
+    let exchanges = load_exchanges(spec_root)?;
+    let (contract_cycles, expiration_rules) = load_cycles_and_rules(spec_root)?;
 
     let mut contracts: HashMap<String, ContractSpec> = HashMap::new();
-    for c in load_contracts(&spec_root)? {
+    for c in load_contracts(spec_root)? {
         if !contract_cycles.contains_key(&c.contract_cycle) {
             return Err(format!(
                 "Contract {} references unknown cycle '{}'",
@@ -255,10 +346,10 @@ fn load_spec_at(spec_root: PathBuf) -> Result<SpecRepository, String> {
         }
     }
 
-    let options = load_all_option_rules(&spec_root)?;
+    let options = load_all_option_rules(spec_root)?;
 
     let mut equities: HashMap<String, EquitySpec> = HashMap::new();
-    for mut eq in load_equities(&spec_root)? {
+    for mut eq in load_equities(spec_root)? {
         let ex_key = eq.exchange.to_uppercase();
         if let Some(ex) = exchanges.get(&ex_key) {
             eq.exchange_timezone = ex.timezone.clone();
@@ -266,7 +357,7 @@ fn load_spec_at(spec_root: PathBuf) -> Result<SpecRepository, String> {
         equities.insert(eq.symbol.to_uppercase(), eq);
     }
 
-    let schedules = load_schedules(&spec_root)?;
+    let schedules = load_schedules(spec_root)?;
     register_schedules(schedules.clone());
 
     Ok(SpecRepository {
@@ -277,5 +368,6 @@ fn load_spec_at(spec_root: PathBuf) -> Result<SpecRepository, String> {
         contract_cycles,
         expiration_rules,
         schedules,
+        pattern_index: std::sync::OnceLock::new(),
     })
 }

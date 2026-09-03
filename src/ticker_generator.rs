@@ -36,16 +36,52 @@ fn format_ticker(contract: &ContractSpec, year: i32, month: u32) -> Result<Strin
     format_contract_ticker(contract, year, month)
 }
 
-pub(crate) fn still_tradeable(
+pub(crate) fn resolve_last_trading_day(
+    expiration_date: NaiveDate,
+    rule: &crate::models::ExpirationRule,
+    calendar: &crate::calendars::ExchangeCalendar,
+) -> NaiveDate {
+    let offset = rule.effective_last_trading_day_offset();
+    if offset < 0 {
+        let days_back = ((-offset) * 7 + 10) as i64;
+        let sessions = calendar.sessions_in_range(
+            expiration_date - chrono::Duration::days(days_back),
+            expiration_date,
+        );
+        let prior: Vec<NaiveDate> = sessions
+            .into_iter()
+            .filter(|&d| d < expiration_date)
+            .collect();
+        let idx = prior.len() as isize + offset as isize;
+        if idx >= 0 && (idx as usize) < prior.len() {
+            return prior[idx as usize];
+        }
+    }
+    expiration_date
+}
+
+pub(crate) fn is_front_eligible(
     as_of: NaiveDate,
     expiration: NaiveDate,
-    contract: &ContractSpec,
+    rule: &crate::models::ExpirationRule,
+    calendar: &crate::calendars::ExchangeCalendar,
 ) -> bool {
-    if contract.symbol == "DOL" || contract.symbol == "WDO" {
-        as_of < expiration
+    let ltd = resolve_last_trading_day(expiration, rule, calendar);
+    if rule.should_roll_on_last_trading_day() {
+        as_of < ltd
     } else {
-        as_of <= expiration
+        as_of <= ltd
     }
+}
+
+pub(crate) fn is_contract_tradeable(
+    as_of: NaiveDate,
+    expiration: NaiveDate,
+    rule: &crate::models::ExpirationRule,
+    calendar: &crate::calendars::ExchangeCalendar,
+) -> bool {
+    let ltd = resolve_last_trading_day(expiration, rule, calendar);
+    as_of <= ltd
 }
 
 /// Collect still-tradeable `(year, month)` pairs scanned forward from
@@ -79,7 +115,7 @@ pub(crate) fn collect_eligible_forward(
                 Ok(d) => d,
                 Err(_) => continue,
             };
-            if still_tradeable(as_of_date, expiration_date, contract) {
+            if is_front_eligible(as_of_date, expiration_date, rule, &cal) {
                 eligible.push((year, month));
             }
         }
@@ -120,7 +156,7 @@ fn collect_eligible_backward(
                 Ok(d) => d,
                 Err(_) => continue,
             };
-            if !still_tradeable(as_of_date, expiration_date, contract) {
+            if !is_front_eligible(as_of_date, expiration_date, rule, &cal) {
                 expired.push((expiration_date, year, month));
             }
         }

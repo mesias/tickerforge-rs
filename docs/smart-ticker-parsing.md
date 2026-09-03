@@ -2,9 +2,9 @@
 
 ## Summary
 
-The ticker parser accepts both **full tickers** (`INDM26`, `DOLK26`, `WINZ25`, `PETRA30`, `IBOVK26C120000`) and **root symbols** (`IND`, `DOL`, `WIN`).
+The ticker parser accepts both **full tickers** (`INDM26`, `DOLK26`, `WINZ25`, `PETRA30`, `IBOVK26C120000`, `PETR4`) and **root symbols** (`IND`, `DOL`, `WIN`), plus offset tags (`DOL[1]`, `IND[-1@roll]`).
 
-`parse_any_ticker*` (and the `TickerParser` methods) parse **futures and options** in a single call, returning an `AnyParsedTicker` enum. The legacy `parse_ticker*` free functions remain available and return `ParsedFuturesTicker` for backward compatibility.
+`parse_any_ticker*` (and the `TickerParser` methods) parse **futures, options, and cash equities** in a single call, returning an `AnyParsedTicker` enum.
 
 Previously, a `reference_date` was always required to interpret the 2-digit year. The new behaviour removes this requirement for full tickers and only uses the date when resolving root symbols to their front-month contract.
 
@@ -28,6 +28,10 @@ Matched against option rules from `SpecRepository.options` (all markets):
 
 No `reference_date` needed; the ticker encodes all date information (equity options have `year = None`).
 
+### Cash equity (e.g. `PETR4`)
+
+Exact key match in `SpecRepository.equities` (checked before futures/options patterns).
+
 ### Root symbol (e.g. `IND`)
 
 When the input does not match any `ticker_format` pattern but matches a known contract symbol, the parser resolves the front-month contract:
@@ -44,12 +48,37 @@ Returns `Err(String)` containing `"Unable to parse ticker"`.
 
 When a ticker matches instruments on multiple markets/types and no `exchange` filter is applied, returns `Err(String)` listing all matches and a hint to disambiguate with `exchange=`.
 
+## Fast classification
+
+Use `classify_ticker*` when you only need `asset_type` / root (and optional year/month) and do **not** need calendars, validity, tick sizes, or front-month resolution. Futures/options regexes are precompiled once per loaded `SpecRepository`. `load_spec` itself is cached by resolved path (`clear_load_spec_cache()` to force reload).
+
+```rust
+use tickerforge::{classify_ticker_spec, load_spec, AssetType};
+
+let spec = load_spec().expect("spec");
+assert_eq!(
+    classify_ticker_spec("INDM26", &spec).unwrap().asset_type,
+    AssetType::Future
+);
+assert_eq!(
+    classify_ticker_spec("PETRA30", &spec).unwrap().root,
+    "PETR4"
+);
+assert_eq!(
+    classify_ticker_spec("IND", &spec).unwrap().year,
+    None
+); // root only — no generator
+```
+
+Ambiguous matches return `Err(String)` with the same message shape as ambiguous parse (`Pass exchange= to disambiguate.`).
+
 ## `AnyParsedTicker` enum
 
 ```rust
 pub enum AnyParsedTicker {
     Futures(ParsedFuturesTicker),
     Option(ParsedOptionTicker),
+    Equity(ParsedEquityTicker),
 }
 ```
 
@@ -59,6 +88,7 @@ Pattern-match on the variant to access the inner struct:
 match parse_any_ticker("PETRA30")? {
     AnyParsedTicker::Futures(f) => println!("futures: {} {}/{}", f.symbol, f.month, f.year),
     AnyParsedTicker::Option(o) => println!("option: {} strike {} is_call={}", o.underlying_or_symbol, o.strike, o.is_call),
+    AnyParsedTicker::Equity(e) => println!("equity: {}", e.symbol),
 }
 ```
 
@@ -74,18 +104,18 @@ Five free functions cover every combination:
 | `parse_any_ticker_date_spec(ticker, date, spec)` | custom | explicit | none |
 | `parse_any_ticker_exchange(ticker, exchange)` | bundled default | today | explicit |
 
-The legacy `parse_ticker*` free functions (futures-only, return `ParsedFuturesTicker`) remain unchanged for backward compatibility:
+## API — `classify_ticker*` free functions
 
-| Function | Spec | Date |
+| Function | Spec | Exchange |
 |---|---|---|
-| `parse_ticker(ticker)` | bundled default | today (for root symbols) |
-| `parse_ticker_date(ticker, date)` | bundled default | explicit |
-| `parse_ticker_spec(ticker, spec)` | custom | today |
-| `parse_ticker_date_spec(ticker, date, spec)` | custom | explicit |
+| `classify_ticker(ticker)` | bundled default | none |
+| `classify_ticker_spec(ticker, spec)` | custom | none |
+| `classify_ticker_exchange(ticker, exchange)` | bundled default | explicit |
+| `classify_ticker_spec_exchange(ticker, spec, exchange)` | custom | explicit |
 
 ## API — `TickerParser` methods
 
-`TickerParser` methods now return `AnyParsedTicker`:
+`TickerParser` methods return `AnyParsedTicker`:
 
 | Method | Date | Exchange |
 |---|---|---|
@@ -117,6 +147,7 @@ use tickerforge::{parse_any_ticker, parse_any_ticker_exchange, AnyParsedTicker, 
 // Parse any ticker — futures or option
 match parse_any_ticker("PETRA30").unwrap() {
     AnyParsedTicker::Futures(_) => unreachable!(),
+    AnyParsedTicker::Equity(_) => unreachable!(),
     AnyParsedTicker::Option(o) => {
         assert_eq!(o.underlying_or_symbol, "PETR4");
         assert!(o.is_call);
@@ -133,11 +164,6 @@ let any = TickerParser::builder()
     .exchange("B3")
     .parse()
     .unwrap();
-
-// Legacy futures-only parse (unchanged API)
-use tickerforge::parse_ticker;
-let futures = parse_ticker("INDM26").unwrap();
-assert_eq!(futures.year, 2026);
 ```
 
 ## `ParsedFuturesTicker` fields
@@ -148,7 +174,7 @@ assert_eq!(futures.year, 2026);
 | `year` | `i32` | Contract year |
 | `month` | `u32` | Contract month (1–12) |
 | `tick_size` | `Option<f64>` | Minimum price increment from the contract spec |
-| `lot_size` | `Option<f64>` | Contract multiplier from the contract spec |
+| `ctr_std` / `ctr_size` | `Option<…>` | Contract standard / size from the contract spec |
 | `contract` | `ContractSpec` | Full contract specification object |
 | `reference_date` | `Option<NaiveDate>` | Date used for root-symbol resolution; `None` for full tickers |
 | `is_trading_session` | `Option<bool>` | Whether `reference_date` is an exchange trading session; `None` for full tickers |
@@ -176,20 +202,12 @@ When a **root symbol** is parsed, the date (explicit or today) is used to resolv
 | `strike` | `String` | Raw strike string from the ticker |
 | `exchange` | `String` | Exchange code |
 | `tick_size` | `Option<f64>` | Minimum price increment |
-| `lot_size` | `Option<f64>` | Contract multiplier |
+| `ctr_std` / `ctr_size` | `Option<…>` | Contract standard / size |
 
 ## Test coverage
 
-`tests/ticker_parsing.rs` — 45 futures parsing tests (full tickers, root symbols, dates, sessions, builder).
+`tests/ticker_parsing.rs` — futures parsing tests (full tickers, root symbols, dates, sessions, builder).
 
-`tests/option_parsing.rs` — 30 option parsing tests:
+`tests/option_parsing.rs` — option parsing tests across equity / index / dollar / interest-rate.
 
-- `spec_loads_options_from_multiple_markets`, `spec_options_include_equity_type`, `spec_options_include_index_type`
-- `parse_equity_call_option`, `parse_equity_put_option`, `parse_equity_call_june`, `parse_equity_put_december`, `parse_equity_option_tick_and_lot`
-- `parse_ibov_call_option`, `parse_ibov_put_option`
-- `parse_dol_call_option`, `parse_dol_put_option`
-- `parse_idi_call_option`, `parse_idi_put_option`
-- `futures_still_parse_via_any`, `cme_futures_parse_via_any`
-- `dol_future_not_ambiguous_with_option`, `dol_option_not_ambiguous_with_future`
-- `exchange_filter_*` (4 tests), `unknown_*` (2 tests)
-- `option_parser_*` low-level API (3 tests), `parse_any_ticker_spec_*` (2 tests)
+`tests/classify_ticker.rs` — fast classification, exchange filter, `load_spec` cache, pattern-index reuse.

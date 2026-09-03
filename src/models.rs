@@ -2,8 +2,10 @@
 
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
 use crate::options_models::OptionRule;
+use crate::pattern_index::{build_pattern_index, PatternIndex};
 use crate::schedule::ExchangeSchedule;
 
 /// One clock-time trading window; YAML uses the map key as `name`.
@@ -202,6 +204,38 @@ pub struct ExpirationRule {
     pub n: Option<i32>,
     #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default)]
+    pub last_trading_day: Option<String>,
+    #[serde(default)]
+    pub last_trading_day_offset: Option<i32>,
+    #[serde(default)]
+    pub roll_on_last_trading_day: Option<bool>,
+}
+
+impl ExpirationRule {
+    pub fn effective_last_trading_day_offset(&self) -> i32 {
+        if let Some(offset) = self.last_trading_day_offset {
+            return offset;
+        }
+        match self.last_trading_day.as_deref() {
+            Some("prior_business_day") | Some("previous_business_day") => -1,
+            Some("same_day") => 0,
+            _ => {
+                if self.r#type == "first_business_day" {
+                    -1
+                } else {
+                    0
+                }
+            }
+        }
+    }
+
+    pub fn should_roll_on_last_trading_day(&self) -> bool {
+        if let Some(roll) = self.roll_on_last_trading_day {
+            return roll;
+        }
+        self.effective_last_trading_day_offset() < 0
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -273,6 +307,9 @@ pub struct SpecRepository {
     pub contract_cycles: HashMap<String, ContractCycle>,
     pub expiration_rules: HashMap<String, ExpirationRule>,
     pub schedules: HashMap<String, ExchangeSchedule>,
+    /// Lazy-filled by classify/parse; not part of load identity.
+    #[doc(hidden)]
+    pub pattern_index: OnceLock<PatternIndex>,
 }
 
 impl SpecRepository {
@@ -295,6 +332,11 @@ impl SpecRepository {
         self.equities
             .get(&key)
             .ok_or_else(|| format!("Unknown equity: {symbol}"))
+    }
+
+    /// Precompiled futures/options regexes (built once per repository instance).
+    pub fn pattern_index(&self) -> &PatternIndex {
+        self.pattern_index.get_or_init(|| build_pattern_index(self))
     }
 }
 
