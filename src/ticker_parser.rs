@@ -26,7 +26,7 @@
 
 use std::path::{Path, PathBuf};
 
-use chrono::NaiveDate;
+use chrono::{Datelike, NaiveDate};
 use regex::Regex;
 
 use crate::calendars::get_calendar;
@@ -34,6 +34,7 @@ use crate::contract_cycle::resolve_contract_months;
 use crate::models::{ParsedEquityTicker, ParsedFuturesTicker, ParsedOptionTicker, SpecRepository};
 use crate::month_codes::code_to_month;
 use crate::options_ticker::OptionParser;
+use crate::pattern_index::equity_decode_month_code;
 use crate::spec_loader::{load_spec, load_spec_from_path};
 use crate::ticker_generator::{generate_ticker_for_contract, generate_ticker_for_contract_signed};
 
@@ -46,21 +47,11 @@ fn coerce_reference_date(reference_date: Option<&str>) -> NaiveDate {
     chrono::Local::now().date_naive()
 }
 
-fn pattern_for_contract(contract: &crate::models::ContractSpec) -> Result<Regex, String> {
-    let mut escaped = regex::escape(&contract.ticker_format);
-    escaped = escaped.replace("\\{symbol\\}", &regex::escape(&contract.symbol));
-    escaped = escaped.replace("\\{month_code\\}", "(?P<month_code>[FGHJKMNQUVXZ])");
-    escaped = escaped.replace("\\{yy\\}", "(?P<yy>\\d{2})");
-    let pattern = format!("^{escaped}$");
-    Regex::new(&pattern).map_err(|e| e.to_string())
-}
-
 fn try_parse_full_ticker(
     ticker: &str,
     spec: &SpecRepository,
 ) -> Result<Option<ParsedFuturesTicker>, String> {
-    for contract in spec.contracts.values() {
-        let re = pattern_for_contract(contract)?;
+    for (re, contract) in &spec.pattern_index().futures {
         let Some(caps) = re.captures(ticker) else {
             continue;
         };
@@ -127,8 +118,8 @@ fn try_resolve_root_symbol(
             rule,
             &cal,
         )?;
-        parsed.is_valid = Some(crate::ticker_generator::still_tradeable(
-            ref_date, expiration, contract,
+        parsed.is_valid = Some(crate::ticker_generator::is_contract_tradeable(
+            ref_date, expiration, rule, &cal,
         ));
     }
     Ok(result)
@@ -143,7 +134,7 @@ fn load_spec_for_builder(spec_path: Option<&Path>) -> Result<SpecRepository, Str
 
 /// If `ticker` matches the `SYMBOL[n]` or `SYMBOL[n@roll]` bracket-tag syntax, return the
 /// uppercased root, the signed offset, and the optional roll condition.
-fn parse_tagged_root(ticker: &str) -> Option<(String, isize, Option<String>)> {
+fn parse_tagged_root(ticker: &str) -> Option<(String, Option<isize>, Option<String>)> {
     static TAG_RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
     let re = TAG_RE.get_or_init(|| {
         Regex::new(r"(?i)^([A-Za-z][A-Za-z0-9]*)\[(?:(-?\d+)?@(roll)|(-?\d+))]$")
@@ -152,15 +143,12 @@ fn parse_tagged_root(ticker: &str) -> Option<(String, isize, Option<String>)> {
     let caps = re.captures(ticker)?;
     let root = caps[1].to_uppercase();
     if caps.get(3).is_some() {
-        let offset = caps
-            .get(2)
-            .map(|m| m.as_str().parse::<isize>().unwrap_or(1))
-            .unwrap_or(1);
+        let offset = caps.get(2).and_then(|m| m.as_str().parse::<isize>().ok());
         let cond = caps[3].to_lowercase();
         Some((root, offset, Some(cond)))
     } else {
         let offset: isize = caps[4].parse().ok()?;
-        Some((root, offset, None))
+        Some((root, Some(offset), None))
     }
 }
 
@@ -169,48 +157,31 @@ fn is_roll_day(
     ref_date: NaiveDate,
     spec: &SpecRepository,
 ) -> Result<bool, String> {
-    let eligible = crate::ticker_generator::collect_eligible_forward(contract, ref_date, spec)?;
-    if eligible.is_empty() {
-        return Ok(false);
-    }
-    let (front_year, front_month) = eligible[0];
+    let cycle = spec
+        .contract_cycles
+        .get(&contract.contract_cycle)
+        .ok_or_else(|| format!("unknown cycle {}", contract.contract_cycle))?;
     let rule = spec
         .expiration_rules
         .get(&contract.expiration_rule)
         .ok_or_else(|| format!("unknown rule {}", contract.expiration_rule))?;
-    let calendar = get_calendar(&contract.exchange);
-    let front_expiration = crate::expiration_rules::resolve_expiration(
-        contract,
-        front_year,
-        front_month,
-        rule,
-        &calendar,
-    )?;
+    let cal = get_calendar(&contract.exchange);
 
-    let roll_date = if contract.symbol == "DOL" || contract.symbol == "WDO" {
-        front_expiration
-    } else {
-        let sessions = calendar.sessions_in_range(
-            front_expiration,
-            front_expiration + chrono::Duration::days(10),
-        );
-        let future_sessions: Vec<NaiveDate> = sessions
-            .into_iter()
-            .filter(|d| *d > front_expiration)
-            .collect();
-        if future_sessions.is_empty() {
-            return Ok(false);
+    for year in (ref_date.year() - 1)..=(ref_date.year() + 1) {
+        let months = crate::contract_cycle::resolve_contract_months(cycle, year)?;
+        for month in months {
+            if let Ok(expiration_date) =
+                crate::expiration_rules::resolve_expiration(contract, year, month, rule, &cal)
+            {
+                let ltd =
+                    crate::ticker_generator::resolve_last_trading_day(expiration_date, rule, &cal);
+                if ref_date == ltd {
+                    return Ok(true);
+                }
+            }
         }
-        future_sessions[0]
-    };
-
-    let sessions = calendar.sessions_in_range(roll_date - chrono::Duration::days(30), roll_date);
-    let past_sessions: Vec<NaiveDate> = sessions.into_iter().filter(|d| *d < roll_date).collect();
-    if past_sessions.is_empty() {
-        return Ok(false);
     }
-    let last_trading_day = past_sessions[past_sessions.len() - 1];
-    Ok(ref_date == last_trading_day)
+    Ok(false)
 }
 
 /// Resolve a `SYMBOL[n]` tagged root to a parsed futures ticker.
@@ -220,7 +191,7 @@ fn try_resolve_tagged_root(
     reference_date: Option<&str>,
     exchange: Option<&str>,
 ) -> Result<Option<ParsedFuturesTicker>, String> {
-    let Some((root, offset, condition)) = parse_tagged_root(ticker) else {
+    let Some((root, offset_opt, condition)) = parse_tagged_root(ticker) else {
         return Ok(None);
     };
     let contract = match spec.contracts.get(&root) {
@@ -234,13 +205,28 @@ fn try_resolve_tagged_root(
     }
 
     let ref_date = coerce_reference_date(reference_date);
+    let rule = spec
+        .expiration_rules
+        .get(&contract.expiration_rule)
+        .ok_or_else(|| format!("unknown rule {}", contract.expiration_rule))?;
 
-    if let Some(cond) = condition {
+    let offset = match offset_opt {
+        Some(o) => o,
+        None => {
+            if rule.should_roll_on_last_trading_day() {
+                0
+            } else {
+                1
+            }
+        }
+    };
+
+    if let Some(cond) = condition.as_deref() {
         if cond == "roll" && !is_roll_day(contract, ref_date, spec)? {
             return Err(format!(
-                    "Ticker '{}[{}@roll]' is not valid on {} because it is not the last trading day of the expiring contract.",
-                    contract.symbol, offset, ref_date.format("%Y-%m-%d")
-                ));
+                "Ticker '{}[{}@roll]' is not valid on {} because it is not the last trading day of the expiring contract.",
+                contract.symbol, offset, ref_date.format("%Y-%m-%d")
+            ));
         }
     }
 
@@ -253,10 +239,6 @@ fn try_resolve_tagged_root(
         parsed.reference_date = Some(ref_date);
         parsed.is_trading_session = Some(!sessions.is_empty());
         parsed.contract_offset = Some(offset);
-        let rule = spec
-            .expiration_rules
-            .get(&contract.expiration_rule)
-            .ok_or_else(|| format!("unknown rule {}", contract.expiration_rule))?;
         let expiration = crate::expiration_rules::resolve_expiration(
             contract,
             parsed.year,
@@ -264,8 +246,8 @@ fn try_resolve_tagged_root(
             rule,
             &cal,
         )?;
-        parsed.is_valid = Some(crate::ticker_generator::still_tradeable(
-            ref_date, expiration, contract,
+        parsed.is_valid = Some(crate::ticker_generator::is_contract_tradeable(
+            ref_date, expiration, rule, &cal,
         ));
     }
     Ok(result)
@@ -330,13 +312,12 @@ fn parse_any_inner(
 
     // Collect futures candidates.
     let mut futures_candidates: Vec<ParsedFuturesTicker> = Vec::new();
-    for contract in spec.contracts.values() {
+    for (re, contract) in &spec.pattern_index().futures {
         if let Some(ex) = exchange {
             if !contract.exchange.eq_ignore_ascii_case(ex) {
                 continue;
             }
         }
-        let re = pattern_for_contract(contract)?;
         let Some(caps) = re.captures(ticker) else {
             continue;
         };
@@ -412,10 +393,8 @@ fn parse_any_inner(
                 rule,
                 &cal,
             )?;
-            f.is_valid = Some(crate::ticker_generator::still_tradeable(
-                ref_date,
-                expiration,
-                &f.contract,
+            f.is_valid = Some(crate::ticker_generator::is_contract_tradeable(
+                ref_date, expiration, rule, &cal,
             ));
         }
         return Ok(AnyParsedTicker::Futures(f));
@@ -478,6 +457,278 @@ pub fn parse_any_ticker_date_spec(
 pub fn parse_any_ticker_exchange(ticker: &str, exchange: &str) -> Result<AnyParsedTicker, String> {
     let spec = load_spec()?;
     parse_any_inner(ticker, &spec, None, Some(exchange))
+}
+
+// ---------------------------------------------------------------------------
+// Lightweight classification (no calendars / validity / generator)
+// ---------------------------------------------------------------------------
+
+/// Asset class returned by [`classify_ticker`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AssetType {
+    /// Futures contract.
+    Future,
+    /// Option contract.
+    Option,
+    /// Cash equity.
+    Equity,
+}
+
+impl std::fmt::Display for AssetType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AssetType::Future => write!(f, "future"),
+            AssetType::Option => write!(f, "option"),
+            AssetType::Equity => write!(f, "equity"),
+        }
+    }
+}
+
+/// Call or put side for classified options.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum OptionSide {
+    Call,
+    Put,
+}
+
+impl std::fmt::Display for OptionSide {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OptionSide::Call => write!(f, "call"),
+            OptionSide::Put => write!(f, "put"),
+        }
+    }
+}
+
+/// Lightweight ticker identity: type and root without calendars or validity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TickerClass {
+    pub asset_type: AssetType,
+    pub root: String,
+    pub exchange: Option<String>,
+    pub year: Option<i32>,
+    pub month: Option<u32>,
+    pub option_type: Option<OptionSide>,
+    pub strike: Option<String>,
+    pub underlying: Option<String>,
+}
+
+fn classify_futures(ticker: &str, spec: &SpecRepository) -> Result<Vec<TickerClass>, String> {
+    let mut results = Vec::new();
+    for (re, contract) in &spec.pattern_index().futures {
+        let Some(caps) = re.captures(ticker) else {
+            continue;
+        };
+        let month_code: char = caps["month_code"].chars().next().unwrap();
+        let month = code_to_month(month_code)?;
+        let yy: i32 = caps["yy"]
+            .parse()
+            .map_err(|e: std::num::ParseIntError| e.to_string())?;
+        results.push(TickerClass {
+            asset_type: AssetType::Future,
+            root: contract.symbol.clone(),
+            exchange: Some(contract.exchange.clone()),
+            year: Some(2000 + yy),
+            month: Some(month),
+            option_type: None,
+            strike: None,
+            underlying: None,
+        });
+    }
+    Ok(results)
+}
+
+fn classify_options(ticker: &str, spec: &SpecRepository) -> Result<Vec<TickerClass>, String> {
+    let index = spec.pattern_index();
+    let mut results = Vec::new();
+
+    for eq in &index.equity_options {
+        let Some(caps) = eq.pattern.captures(ticker) else {
+            continue;
+        };
+        let mc_char = caps["month_code"].chars().next().unwrap();
+        let Some((month, is_call)) =
+            equity_decode_month_code(mc_char, &eq.call_month_codes, &eq.put_month_codes)
+        else {
+            continue;
+        };
+        results.push(TickerClass {
+            asset_type: AssetType::Option,
+            root: eq.underlying.clone(),
+            exchange: Some(eq.exchange.clone()),
+            year: None,
+            month: Some(month),
+            option_type: Some(if is_call {
+                OptionSide::Call
+            } else {
+                OptionSide::Put
+            }),
+            strike: Some(caps["strike"].to_string()),
+            underlying: Some(eq.underlying.clone()),
+        });
+    }
+
+    for ne in &index.nonequity_options {
+        let Some(caps) = ne.pattern.captures(ticker) else {
+            continue;
+        };
+        let month_code: char = caps["month_code"].chars().next().unwrap();
+        let month = code_to_month(month_code)?;
+        let yy: i32 = caps["yy"]
+            .parse()
+            .map_err(|e: std::num::ParseIntError| e.to_string())?;
+        let opt_type_str = &caps["option_type"];
+        let option_type = if opt_type_str == ne.option_type_codes.call {
+            OptionSide::Call
+        } else {
+            OptionSide::Put
+        };
+        results.push(TickerClass {
+            asset_type: AssetType::Option,
+            root: ne.symbol.clone(),
+            exchange: Some(ne.exchange.clone()),
+            year: Some(2000 + yy),
+            month: Some(month),
+            option_type: Some(option_type),
+            strike: Some(caps["strike"].to_string()),
+            underlying: None,
+        });
+    }
+
+    Ok(results)
+}
+
+fn pick_unique_class(ticker: &str, candidates: Vec<TickerClass>) -> Result<TickerClass, String> {
+    match candidates.len() {
+        1 => Ok(candidates.into_iter().next().unwrap()),
+        0 => Err(format!("Unable to classify ticker: {ticker}")),
+        n => {
+            let detail: Vec<String> = candidates
+                .iter()
+                .map(|m| {
+                    format!(
+                        "  - {} on {}: {}",
+                        m.asset_type,
+                        m.exchange.as_deref().unwrap_or("?"),
+                        m.root
+                    )
+                })
+                .collect();
+            Err(format!(
+                "Ambiguous ticker '{ticker}' matched {n} instruments:\n{}\nPass exchange= to disambiguate.",
+                detail.join("\n")
+            ))
+        }
+    }
+}
+
+fn classify_inner(
+    ticker: &str,
+    spec: &SpecRepository,
+    exchange: Option<&str>,
+) -> Result<TickerClass, String> {
+    let key = ticker.to_uppercase();
+    if let Some(eq) = spec.equities.get(&key) {
+        let matches_exchange = exchange
+            .map(|ex| eq.exchange.eq_ignore_ascii_case(ex))
+            .unwrap_or(true);
+        if matches_exchange {
+            return Ok(TickerClass {
+                asset_type: AssetType::Equity,
+                root: eq.symbol.clone(),
+                exchange: Some(eq.exchange.clone()),
+                year: None,
+                month: None,
+                option_type: None,
+                strike: None,
+                underlying: None,
+            });
+        }
+    }
+
+    let mut candidates = classify_futures(ticker, spec)?;
+    candidates.extend(classify_options(ticker, spec)?);
+    if let Some(ex) = exchange {
+        candidates.retain(|c| {
+            c.exchange
+                .as_ref()
+                .map(|e| e.eq_ignore_ascii_case(ex))
+                .unwrap_or(false)
+        });
+    }
+    if !candidates.is_empty() {
+        return pick_unique_class(ticker, candidates);
+    }
+
+    if let Some((root, _, _)) = parse_tagged_root(ticker) {
+        if let Some(contract) = spec.contracts.get(&root) {
+            let matches_exchange = exchange
+                .map(|ex| contract.exchange.eq_ignore_ascii_case(ex))
+                .unwrap_or(true);
+            if matches_exchange {
+                return Ok(TickerClass {
+                    asset_type: AssetType::Future,
+                    root: contract.symbol.clone(),
+                    exchange: Some(contract.exchange.clone()),
+                    year: None,
+                    month: None,
+                    option_type: None,
+                    strike: None,
+                    underlying: None,
+                });
+            }
+        }
+        return Err(format!("Unable to classify ticker: {ticker}"));
+    }
+
+    if let Some(contract) = spec.contracts.get(&key) {
+        let matches_exchange = exchange
+            .map(|ex| contract.exchange.eq_ignore_ascii_case(ex))
+            .unwrap_or(true);
+        if matches_exchange {
+            return Ok(TickerClass {
+                asset_type: AssetType::Future,
+                root: contract.symbol.clone(),
+                exchange: Some(contract.exchange.clone()),
+                year: None,
+                month: None,
+                option_type: None,
+                strike: None,
+                underlying: None,
+            });
+        }
+    }
+
+    Err(format!("Unable to classify ticker: {ticker}"))
+}
+
+/// Classify a ticker into asset type and root without calendars or validity.
+///
+/// Faster than [`parse_any_ticker`] for UI filters and routing: skips expiration
+/// rules, trading calendars, front-month generation, and cycle-month checks.
+pub fn classify_ticker(ticker: &str) -> Result<TickerClass, String> {
+    let spec = load_spec()?;
+    classify_inner(ticker, &spec, None)
+}
+
+/// Classify using a custom [`SpecRepository`].
+pub fn classify_ticker_spec(ticker: &str, spec: &SpecRepository) -> Result<TickerClass, String> {
+    classify_inner(ticker, spec, None)
+}
+
+/// Classify restricted to a single exchange (case-insensitive).
+pub fn classify_ticker_exchange(ticker: &str, exchange: &str) -> Result<TickerClass, String> {
+    let spec = load_spec()?;
+    classify_inner(ticker, &spec, Some(exchange))
+}
+
+/// Classify with a custom spec and exchange filter.
+pub fn classify_ticker_spec_exchange(
+    ticker: &str,
+    spec: &SpecRepository,
+    exchange: &str,
+) -> Result<TickerClass, String> {
+    classify_inner(ticker, spec, Some(exchange))
 }
 
 // ===========================================================================
@@ -701,5 +952,55 @@ impl TickerParser {
         reference_date: &str,
     ) -> Result<AnyParsedTicker, String> {
         parse_any_inner(ticker, &self.spec, Some(reference_date), None)
+    }
+}
+
+#[cfg(test)]
+mod classify_unit_tests {
+    use super::*;
+
+    #[test]
+    fn pick_unique_class_ambiguous_message() {
+        let matches = vec![
+            TickerClass {
+                asset_type: AssetType::Future,
+                root: "A".into(),
+                exchange: Some("B3".into()),
+                year: None,
+                month: None,
+                option_type: None,
+                strike: None,
+                underlying: None,
+            },
+            TickerClass {
+                asset_type: AssetType::Option,
+                root: "B".into(),
+                exchange: Some("B3".into()),
+                year: None,
+                month: None,
+                option_type: None,
+                strike: None,
+                underlying: None,
+            },
+        ];
+        let err = pick_unique_class("FOO", matches).unwrap_err();
+        assert!(err.contains("Ambiguous ticker"));
+        assert!(err.contains("Pass exchange= to disambiguate."));
+    }
+
+    #[test]
+    fn pick_unique_class_empty_raises() {
+        let err = pick_unique_class("FOO", vec![]).unwrap_err();
+        assert!(err.contains("Unable to classify"));
+    }
+
+    #[test]
+    fn pattern_index_reused_across_classify() {
+        let spec = load_spec().expect("spec");
+        classify_ticker_spec("INDM26", &spec).expect("classify");
+        let first = spec.pattern_index() as *const _;
+        classify_ticker_spec("DOLN26", &spec).expect("classify");
+        let second = spec.pattern_index() as *const _;
+        assert_eq!(first, second);
     }
 }

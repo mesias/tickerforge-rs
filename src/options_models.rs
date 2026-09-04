@@ -104,7 +104,7 @@ pub struct InterestRateOptionRule {
     pub expiration_rule: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct OptionTypeCodes {
     pub call: String,
     pub put: String,

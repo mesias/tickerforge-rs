@@ -266,18 +266,18 @@ fn tagged_root_stamps_reference_date_and_session() {
 #[test]
 fn parse_dol_roll_tag_valid_on_roll_day() {
     // For DOLN26 (July 2026), the expiration is July 1st, 2026.
-    // DOL rolls off on expiration day, so the last trading day is June 30th, 2026.
+    // DOL rolls to the August contract (DOLQ26) on its last trading day, June 30th, 2026.
     let ref_roll = "2026-06-30";
 
     let any = parse_any_ticker_date("DOL[@roll]", ref_roll).expect("parse shortcut");
     let parsed = as_futures(any);
     assert_eq!(parsed.ticker().expect("ticker"), "DOLQ26");
-    assert_eq!(parsed.contract_offset, Some(1));
+    assert_eq!(parsed.contract_offset, Some(0));
 
-    let any_zero = parse_any_ticker_date("DOL[0@roll]", ref_roll).expect("parse explicit zero");
-    let parsed_zero = as_futures(any_zero);
-    assert_eq!(parsed_zero.ticker().expect("ticker"), "DOLN26");
-    assert_eq!(parsed_zero.contract_offset, Some(0));
+    let any_expiring = parse_any_ticker_date("DOL[-1@roll]", ref_roll).expect("parse expiring");
+    let parsed_expiring = as_futures(any_expiring);
+    assert_eq!(parsed_expiring.ticker().expect("ticker"), "DOLN26");
+    assert_eq!(parsed_expiring.contract_offset, Some(-1));
 }
 
 #[test]

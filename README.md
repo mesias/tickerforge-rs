@@ -59,7 +59,7 @@ use tickerforge::{parse_any_ticker, parse_any_ticker_exchange, AnyParsedTicker};
 match parse_any_ticker("PETR4").unwrap() {
     AnyParsedTicker::Equity(e) => {
         assert_eq!(e.symbol, "PETR4");
-        assert_eq!(e.exchange, "B3");
+        assert_eq!(e.equity.exchange, "B3");
     }
     _ => unreachable!(),
 }
@@ -115,21 +115,53 @@ Five free functions cover every combination:
 | `parse_any_ticker_date_spec(ticker, date, spec)` | custom | explicit | — |
 | `parse_any_ticker_exchange(ticker, exchange)` | bundled | today | explicit |
 
-### Parsing tickers — futures only (legacy API)
+### Classifying tickers (fast path)
 
-The `parse_ticker*` free functions remain available and return `ParsedFuturesTicker` directly:
+`classify_ticker*` returns asset type and root **without** calendars, expiration rules, or front-month generation — useful for UI filters and routing. `load_spec` results are cached by path (`clear_load_spec_cache` to force reload).
 
 ```rust
-use tickerforge::{parse_ticker, parse_ticker_date, parse_ticker_spec, parse_ticker_date_spec, load_spec};
+use tickerforge::{classify_ticker_spec, load_spec, AssetType};
 
-let parsed = parse_ticker("INDM26").expect("parse");
-let parsed = parse_ticker_date("IND", "2026-06-01").expect("parse");
-let spec = load_spec().expect("spec");
-let parsed = parse_ticker_spec("DOLK26", &spec).expect("parse");
-let parsed = parse_ticker_date_spec("DOL", "2026-04-15", &spec).expect("parse");
+let spec = load_spec().expect("spec"); // cached
+let classified = classify_ticker_spec("INDM26", &spec).expect("classify");
+assert_eq!(classified.asset_type, AssetType::Future);
+assert_eq!(classified.root, "IND");
+
+let classified = classify_ticker_spec("PETRA30", &spec).expect("classify");
+assert_eq!(classified.asset_type, AssetType::Option);
+assert_eq!(classified.root, "PETR4");
+
+let classified = classify_ticker_spec("DOL[1]", &spec).expect("classify");
+assert_eq!(classified.asset_type, AssetType::Future);
+assert_eq!(classified.root, "DOL");
 ```
 
-### `TickerParser` — stateful parsing (futures + options)
+| Function | Spec | Exchange |
+|---|---|---|
+| `classify_ticker(ticker)` | bundled | — |
+| `classify_ticker_spec(ticker, spec)` | custom | — |
+| `classify_ticker_exchange(ticker, exchange)` | bundled | explicit |
+| `classify_ticker_spec_exchange(ticker, spec, exchange)` | custom | explicit |
+
+### Parsing tickers — futures only via `AnyParsedTicker::Futures`
+
+Prefer `parse_any_ticker*` (or `TickerParser`) and match `AnyParsedTicker::Futures` when you need a futures-only result:
+
+```rust
+use tickerforge::{parse_any_ticker, parse_any_ticker_spec, load_spec, AnyParsedTicker};
+
+let parsed = match parse_any_ticker("INDM26").expect("parse") {
+    AnyParsedTicker::Futures(f) => f,
+    _ => panic!("expected futures"),
+};
+let spec = load_spec().expect("spec");
+let parsed = match parse_any_ticker_spec("DOLK26", &spec).expect("parse") {
+    AnyParsedTicker::Futures(f) => f,
+    _ => panic!("expected futures"),
+};
+```
+
+### `TickerParser` — stateful parsing (futures + options + equities)
 
 `TickerParser` wraps a loaded spec for repeated calls. Methods now return `AnyParsedTicker`.
 

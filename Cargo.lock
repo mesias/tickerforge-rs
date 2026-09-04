@@ -334,7 +334,7 @@ dependencies = [
 
 [[package]]
 name = "tickerforge"
-version = "0.1.12"
+version = "0.1.15"
 dependencies = [
  "bdays",
  "chrono",
@@ -348,7 +348,7 @@ dependencies = [
 
 [[package]]
 name = "tickerforge-spec-data"
-version = "0.1.13"
+version = "0.1.14"
 
 [[package]]
 name = "unicode-ident"

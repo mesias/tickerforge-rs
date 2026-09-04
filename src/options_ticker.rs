@@ -1,7 +1,5 @@
 //! Options ticker generation (B3) and parsing (all markets).
 
-use regex::Regex;
-
 use chrono::{Datelike, NaiveDate};
 
 use crate::calendars::get_calendar;
@@ -11,6 +9,7 @@ use crate::expiration_rules::{month_sessions, resolve_expiration};
 use crate::models::{ContractSpec, ParsedOptionTicker, SpecRepository};
 use crate::month_codes::{code_to_month, month_to_code};
 use crate::options_models::{OptionRule, OptionTypeCodes};
+use crate::pattern_index::equity_decode_month_code;
 
 fn parse_date(s: &str) -> Result<NaiveDate, String> {
     NaiveDate::parse_from_str(s.trim(), "%Y-%m-%d").map_err(|e| e.to_string())
@@ -28,14 +27,6 @@ pub fn equity_root(underlying: &str) -> String {
         }
     }
     cs.into_iter().collect()
-}
-
-fn still_tradeable(as_of: NaiveDate, expiration: NaiveDate, contract: &ContractSpec) -> bool {
-    if contract.symbol == "DOL" || contract.symbol == "WDO" {
-        as_of < expiration
-    } else {
-        as_of <= expiration
-    }
 }
 
 fn synthetic_contract(symbol: &str, exchange: &str, cycle: &str, exp_rule: &str) -> ContractSpec {
@@ -84,131 +75,12 @@ fn collect_eligible_months(
                 Ok(d) => d,
                 Err(_) => continue,
             };
-            if still_tradeable(as_of, expiration_date, contract) {
+            if crate::ticker_generator::is_front_eligible(as_of, expiration_date, rule, &cal) {
                 eligible.push((year, month));
             }
         }
     }
     Ok(eligible)
-}
-
-// ---------------------------------------------------------------------------
-// Parsing helpers
-// ---------------------------------------------------------------------------
-
-/// Build a combined character class string for all equity call + put codes.
-fn equity_all_codes(call_codes: &[String], put_codes: &[String]) -> String {
-    let mut s = String::new();
-    for c in call_codes.iter().chain(put_codes.iter()) {
-        if let Some(ch) = c.chars().next() {
-            s.push(ch);
-        }
-    }
-    s
-}
-
-/// Map an equity option month code character back to `(month, is_call)`.
-fn equity_decode_month_code(
-    ch: char,
-    call_codes: &[String],
-    put_codes: &[String],
-) -> Option<(u32, bool)> {
-    let upper = ch.to_ascii_uppercase().to_string();
-    if let Some(idx) = call_codes.iter().position(|c| *c == upper) {
-        return Some(((idx as u32) + 1, true));
-    }
-    if let Some(idx) = put_codes.iter().position(|c| *c == upper) {
-        return Some(((idx as u32) + 1, false));
-    }
-    None
-}
-
-const FUTURES_MONTH_CODES: &str = "FGHJKMNQUVXZ";
-
-/// Try to match `ticker` against all equity option underlyings in `rule`.
-fn match_equity_options(
-    ticker: &str,
-    rule: &crate::options_models::EquityOptionRule,
-) -> Vec<ParsedOptionTicker> {
-    let all_codes = equity_all_codes(&rule.call_month_codes, &rule.put_month_codes);
-    let codes_escaped: String = regex::escape(&all_codes);
-
-    let mut results = Vec::new();
-    for underlying in &rule.underlyings {
-        let root = equity_root(underlying);
-        let pattern = format!(
-            "^{}(?P<month_code>[{codes_escaped}])(?P<strike>\\d+)$",
-            regex::escape(&root)
-        );
-        let re = match Regex::new(&pattern) {
-            Ok(r) => r,
-            Err(_) => continue,
-        };
-        let Some(caps) = re.captures(ticker) else {
-            continue;
-        };
-        let mc_char = caps["month_code"].chars().next().unwrap();
-        let Some((month, is_call)) =
-            equity_decode_month_code(mc_char, &rule.call_month_codes, &rule.put_month_codes)
-        else {
-            continue;
-        };
-        results.push(ParsedOptionTicker {
-            kind: "equity".to_string(),
-            underlying_or_symbol: underlying.clone(),
-            year: None,
-            month,
-            is_call,
-            strike: caps["strike"].to_string(),
-            exchange: rule.exchange.clone(),
-            tick_size: rule.tick_size,
-            ctr_std: rule.ctr_std,
-            ctr_size: rule.ctr_size,
-        });
-    }
-    results
-}
-
-/// Try to match `ticker` against a non-equity option rule (index / dollar / interest_rate).
-#[allow(clippy::too_many_arguments)]
-fn match_nonequity_option(
-    ticker: &str,
-    kind: &str,
-    symbol: &str,
-    exchange: &str,
-    opt_codes: &OptionTypeCodes,
-    tick_size: Option<f64>,
-    ctr_std: Option<u32>,
-    ctr_size: Option<f64>,
-) -> Option<ParsedOptionTicker> {
-    let call_esc = regex::escape(&opt_codes.call);
-    let put_esc = regex::escape(&opt_codes.put);
-    let pattern = format!(
-        "^{}(?P<month_code>[{FUTURES_MONTH_CODES}])(?P<yy>\\d{{2}})(?P<opt_type>{call_esc}|{put_esc})(?P<strike>\\d+)$",
-        regex::escape(symbol)
-    );
-    let re = Regex::new(&pattern).ok()?;
-    let caps = re.captures(ticker)?;
-
-    let mc_char = caps["month_code"].chars().next().unwrap();
-    let month = code_to_month(mc_char).ok()?;
-    let yy: i32 = caps["yy"].parse().ok()?;
-    let year = 2000 + yy;
-    let opt_type_str = &caps["opt_type"];
-    let is_call = opt_type_str == opt_codes.call;
-
-    Some(ParsedOptionTicker {
-        kind: kind.to_string(),
-        underlying_or_symbol: symbol.to_string(),
-        year: Some(year),
-        month,
-        is_call,
-        strike: caps["strike"].to_string(),
-        exchange: exchange.to_string(),
-        tick_size,
-        ctr_std,
-        ctr_size,
-    })
 }
 
 /// Rebuild an option ticker string from a [`ParsedOptionTicker`].
@@ -317,54 +189,71 @@ impl OptionParser {
         spec: &SpecRepository,
         exchange: Option<&str>,
     ) -> Vec<ParsedOptionTicker> {
+        let index = spec.pattern_index();
         let mut results: Vec<ParsedOptionTicker> = Vec::new();
 
-        for rule in &spec.options {
-            let mut candidates = match rule {
-                OptionRule::Equity(r) => match_equity_options(ticker, r),
-                OptionRule::Index(r) => match_nonequity_option(
-                    ticker,
-                    "index",
-                    &r.symbol,
-                    &r.exchange,
-                    &r.option_type_codes,
-                    r.tick_size,
-                    r.ctr_std,
-                    r.ctr_size,
-                )
-                .into_iter()
-                .collect(),
-                OptionRule::Dollar(r) => match_nonequity_option(
-                    ticker,
-                    "dollar",
-                    &r.symbol,
-                    &r.exchange,
-                    &r.option_type_codes,
-                    r.tick_size,
-                    r.ctr_std,
-                    r.ctr_size,
-                )
-                .into_iter()
-                .collect(),
-                OptionRule::InterestRate(r) => match_nonequity_option(
-                    ticker,
-                    "interest_rate",
-                    &r.symbol,
-                    &r.exchange,
-                    &r.option_type_codes,
-                    r.tick_size,
-                    r.ctr_std,
-                    r.ctr_size,
-                )
-                .into_iter()
-                .collect(),
+        for eq in &index.equity_options {
+            let Some(caps) = eq.pattern.captures(ticker) else {
+                continue;
             };
-
+            let mc_char = caps["month_code"].chars().next().unwrap();
+            let Some((month, is_call)) =
+                equity_decode_month_code(mc_char, &eq.call_month_codes, &eq.put_month_codes)
+            else {
+                continue;
+            };
+            let parsed = ParsedOptionTicker {
+                kind: "equity".to_string(),
+                underlying_or_symbol: eq.underlying.clone(),
+                year: None,
+                month,
+                is_call,
+                strike: caps["strike"].to_string(),
+                exchange: eq.exchange.clone(),
+                tick_size: eq.tick_size,
+                ctr_std: eq.ctr_std,
+                ctr_size: eq.ctr_size,
+            };
             if let Some(ex) = exchange {
-                candidates.retain(|c| c.exchange.eq_ignore_ascii_case(ex));
+                if !parsed.exchange.eq_ignore_ascii_case(ex) {
+                    continue;
+                }
             }
+            results.push(parsed);
+        }
 
-            results.extend(candidates);
+        for ne in &index.nonequity_options {
+            let Some(caps) = ne.pattern.captures(ticker) else {
+                continue;
+            };
+            let mc_char = caps["month_code"].chars().next().unwrap();
+            let Ok(month) = code_to_month(mc_char) else {
+                continue;
+            };
+            let Ok(yy) = caps["yy"].parse::<i32>() else {
+                continue;
+            };
+            let year = 2000 + yy;
+            let opt_type_str = &caps["option_type"];
+            let is_call = opt_type_str == ne.option_type_codes.call;
+            let parsed = ParsedOptionTicker {
+                kind: ne.kind.clone(),
+                underlying_or_symbol: ne.symbol.clone(),
+                year: Some(year),
+                month,
+                is_call,
+                strike: caps["strike"].to_string(),
+                exchange: ne.exchange.clone(),
+                tick_size: ne.tick_size,
+                ctr_std: ne.ctr_std,
+                ctr_size: ne.ctr_size,
+            };
+            if let Some(ex) = exchange {
+                if !parsed.exchange.eq_ignore_ascii_case(ex) {
+                    continue;
+                }
+            }
+            results.push(parsed);
         }
 
         results
